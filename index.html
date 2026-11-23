@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Cadbury DMS | Distributor Management & Goods Tracking System</title>
+    <meta name="description" content="Complete Distributor Management System for Cadbury: Live Goods Tracking, Vehicle GPS, Loader Management, Mobile Delivery & Party Ledgers">
+    <meta name="author" content="Cadbury Distributor">
+    
+    <!-- PWA & Mobile Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Cadbury DMS">
+    <meta name="theme-color" content="#3d0c5a">
+    <meta name="mobile-web-app-capable" content="yes">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              cadbury: {
+                50: '#f7f2fb',
+                100: '#ede3f7',
+                200: '#ddc7ef',
+                300: '#c5a0e3',
+                400: '#a772d3',
+                500: '#8b48c0',
+                600: '#7333a4',
+                700: '#5c2586',
+                800: '#4a206c',
+                900: '#3d0c5a',
+                950: '#26063b',
+              },
+              gold: {
+                400: '#fbbf24',
+                500: '#f59e0b',
+                600: '#d97706'
+              }
+            }
+          }
+        }
+      }
+    </script>
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+
+    <!-- Leaflet Map CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- html2pdf for direct A4 PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+      
+      * {
+        font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      }
+      
+      body {
+        background-color: #f8fafc;
+        color: #1e293b;
+        margin: 0;
+        padding: 0;
+      }
+
+      /* Custom scrollbars */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #f1f5f9;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+
+      /* Cadbury themed badges & gradients */
+      .cadbury-gradient {
+        background: linear-gradient(135deg, #3d0c5a 0%, #5c2586 50%, #26063b 100%);
+      }
+      .gold-gradient {
+        background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+      }
+
+      /* Leaflet map styling fixes */
+      .leaflet-pane {
+        z-index: 10 !important;
+      }
+      .leaflet-top, .leaflet-bottom {
+        z-index: 11 !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
