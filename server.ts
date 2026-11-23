@@ -1084,6 +1084,61 @@ async function startServer() {
     }
   });
 
+  // 14B. Clear All Previous Data (Clean Slate for Real New Data Entry)
+  app.post("/api/cadbury/clear-all-data", (req, res) => {
+    try {
+      const oldOrdersCount = store.orders.length;
+      const oldPartiesCount = store.parties.length;
+
+      // Clear transactional data
+      store.orders = [];
+      store.loaderTasks = [];
+      store.parties = [];
+      store.payments = [];
+      store.returns = [];
+      store.tripSettlements = [];
+
+      // Reset stock & loaded cartons
+      store.vehicles.forEach(v => { v.loadedCartons = 0; v.status = 'Available'; });
+      store.products.forEach(p => { p.stockCartons = 0; p.availableStock = 0; p.reservedStock = 0; p.loadedStock = 0; p.damagedStock = 0; });
+
+      saveStore();
+
+      // Broadcast empty state
+      io.emit("order_updated", []);
+      io.emit("loader_updated", []);
+      io.emit("parties_updated", []);
+      io.emit("payments_updated", []);
+      io.emit("returns_updated", []);
+      io.emit("settlement_updated", []);
+      io.emit("initial_data", {
+        stats: calculateKPIs(),
+        products: store.products,
+        parties: store.parties,
+        routes: store.routes,
+        vehicles: store.vehicles,
+        orders: store.orders,
+        loaderTasks: store.loaderTasks,
+        payments: store.payments,
+        returns: store.returns,
+        tripSettlements: store.tripSettlements,
+        users: store.users
+      });
+
+      console.log(`🧹 All previous data cleared (${oldOrdersCount} orders, ${oldPartiesCount} parties). Ready for fresh data entry.`);
+
+      res.json({
+        success: true,
+        message: `Sabhi purane ${oldOrdersCount} bills aur ${oldPartiesCount} parties safalta se clear ho gaye! Ab aap apna naya data fresh dhal sakte hain.`,
+        clearedOrders: oldOrdersCount,
+        clearedParties: oldPartiesCount
+      });
+    } catch (err: any) {
+      console.error("Error clearing data:", err);
+      res.status(500).json({ error: "Data clear karne me samasya aayi: " + err.message });
+    }
+  });
+
   // 15. Complete Database Backup Download (Local Drive & Cloud JSON)
   app.get("/api/cadbury/backup/download", (req, res) => {
     try {

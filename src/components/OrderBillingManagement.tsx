@@ -866,6 +866,27 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
     }
   };
 
+  // Clear All Previous Data Handler (Fresh Start for Real User Data)
+  const [isClearingAllData, setIsClearingAllData] = useState<boolean>(false);
+  const handleClearAllData = async () => {
+    if (!confirm('क्या आप वाकई सभी पुराने बिल और पार्टियाँ हटाना चाहते हैं?\n\nइसके बाद आप अपना खुद का नया डेटा (Orders, Parties, Payments) शुरू से फ्रेश डाल सकेंगे।\n(सुरक्षा हेतु पहले बैकअप अपने कंप्यूटर में डाउनलोड कर लें)')) {
+      return;
+    }
+    setIsClearingAllData(true);
+    try {
+      const res = await fetch('/api/cadbury/clear-all-data', { method: 'POST' });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Failed to clear data');
+      alert('🎉 ' + data.message);
+      setIsBackupModalOpen(false);
+      window.location.reload();
+    } catch (err: any) {
+      alert('Data clear error: ' + err.message);
+    } finally {
+      setIsClearingAllData(false);
+    }
+  };
+
   // Open Evening Trip Settlement modal and prepare reconciliation defaults
   const handleOpenEveningSettlement = (loadNo = '188', veh = 'ALL') => {
     setSelectedTripLoadNo(loadNo);
@@ -7709,6 +7730,30 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                   {restoreStatus.text}
                 </div>
               )}
+            </div>
+
+            {/* SECTION 4: Clear All Previous Data (Clean Slate for Real Data) */}
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2.5">
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-trash-can text-rose-600 text-base"></i>
+                <h4 className="text-xs font-black text-rose-950 uppercase tracking-wide">
+                  4. Clear All Previous Data (नया डेटा भरने हेतु पुराना डेटा साफ़ करें)
+                </h4>
+              </div>
+              <p className="text-[11px] text-slate-600">
+                यदि आप सभी पुराने टेस्ट / डेमो बिल और पार्टियाँ हटाकर अपना असली नया डेटा शुरू से भरना चाहते हैं, तो यह बटन दबाएं। लॉगिन यूज़र्स और कैडबरी प्रोडक्ट्स सुरक्षित रहेंगे।
+              </p>
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={handleClearAllData}
+                  disabled={isClearingAllData}
+                  className="px-4 py-2 bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-700 hover:to-red-800 text-white font-black text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-all disabled:opacity-50"
+                >
+                  <i className={`fa-solid ${isClearingAllData ? 'fa-spinner fa-spin' : 'fa-broom'} text-white`}></i>
+                  {isClearingAllData ? 'Clearing Data...' : '🧹 Clear All Previous Data (पुराना डेटा पूरी तरह साफ़ करें)'}
+                </button>
+              </div>
             </div>
 
             {/* Footer close */}
