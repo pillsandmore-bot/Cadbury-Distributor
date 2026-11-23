@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 // @ts-ignore
 import html2pdf from 'html2pdf.js';
@@ -129,6 +129,20 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
   const [isDownloadingSettlementPdf, setIsDownloadingSettlementPdf] = useState<boolean>(false);
   const [pastSettlements, setPastSettlements] = useState<any[]>([]);
   const [showPastSettlementsTab, setShowPastSettlementsTab] = useState<boolean>(false);
+
+  // Cash Deposit Envelope Slip & Excel Import State (कैश लिफाफा रसीद व एक्सेल इम्पोर्ट)
+  const eveningImportInputRef = useRef<HTMLInputElement>(null);
+  const [isEnvelopeSlipModalOpen, setIsEnvelopeSlipModalOpen] = useState<boolean>(false);
+  const [envelopeDenominations, setEnvelopeDenominations] = useState<{ n500: string; n200: string; n100: string; n50: string; n20: string; n10: string; coins: string }>({
+    n500: '',
+    n200: '',
+    n100: '',
+    n50: '',
+    n20: '',
+    n10: '',
+    coins: ''
+  });
+  const [isDownloadingEnvelopePdf, setIsDownloadingEnvelopePdf] = useState<boolean>(false);
 
   // Sales Invoice Printing Dialog State (WinOmkar Sales Booking)
   const [isSalesInvoicePrintModalOpen, setIsSalesInvoicePrintModalOpen] = useState<boolean>(false);
@@ -2030,6 +2044,448 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
         }
       }, 3000);
     }, 600);
+  };
+
+  // Convert Number to Indian Words for Bank / Cash Deposit Slips
+  const numberToIndianWords = (num: number): string => {
+    if (!num || isNaN(num) || num <= 0) return 'Zero Rupees Only';
+    num = Math.floor(num);
+    const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
+    const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+    const inWords = (n: number): string => {
+      let str = '';
+      if (n > 99) {
+        str += a[Math.floor(n / 100)] + 'Hundred ';
+        n %= 100;
+      }
+      if (n > 19) {
+        str += b[Math.floor(n / 10)] + ' ' + a[n % 10];
+      } else if (n > 0) {
+        str += a[n];
+      }
+      return str;
+    };
+
+    let result = '';
+    const crore = Math.floor(num / 10000000);
+    num %= 10000000;
+    const lakh = Math.floor(num / 100000);
+    num %= 100000;
+    const thousand = Math.floor(num / 1000);
+    num %= 1000;
+
+    if (crore > 0) result += inWords(crore) + 'Crore ';
+    if (lakh > 0) result += inWords(lakh) + 'Lakh ';
+    if (thousand > 0) result += inWords(thousand) + 'Thousand ';
+    if (num > 0) result += inWords(num);
+
+    return ('Rupees ' + result.trim() + ' Only').replace(/\s+/g, ' ');
+  };
+
+  // Auto-Calculate Standard Denominations for Envelope Cash
+  const handleAutoBreakdownDenominations = (targetCash?: number) => {
+    const cashVal = targetCash !== undefined ? targetCash : (Number(settlementActualCash) || 0);
+    let rem = Math.floor(cashVal);
+
+    const n500 = Math.floor(rem / 500);
+    rem %= 500;
+    const n200 = Math.floor(rem / 200);
+    rem %= 200;
+    const n100 = Math.floor(rem / 100);
+    rem %= 100;
+    const n50 = Math.floor(rem / 50);
+    rem %= 50;
+    const n20 = Math.floor(rem / 20);
+    rem %= 20;
+    const n10 = Math.floor(rem / 10);
+    rem %= 10;
+    const coins = rem;
+
+    setEnvelopeDenominations({
+      n500: n500 > 0 ? String(n500) : '',
+      n200: n200 > 0 ? String(n200) : '',
+      n100: n100 > 0 ? String(n100) : '',
+      n50: n50 > 0 ? String(n50) : '',
+      n20: n20 > 0 ? String(n20) : '',
+      n10: n10 > 0 ? String(n10) : '',
+      coins: coins > 0 ? String(coins) : ''
+    });
+  };
+
+  // Import Evening Settlement Excel / CSV File Handler
+  const handleImportEveningSettlement = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const isExcel = /\.(xlsx|xls|xlsm|xlsb)$/i.test(file.name);
+    const reader = new FileReader();
+
+    reader.onload = (evt) => {
+      try {
+        let workbook: XLSX.WorkBook;
+        if (isExcel) {
+          const buffer = evt.target?.result as ArrayBuffer;
+          workbook = XLSX.read(buffer, { type: 'array' });
+        } else {
+          const csvText = (evt.target?.result as string) || '';
+          workbook = XLSX.read(csvText, { type: 'string' });
+        }
+
+        const activeTripOrders = getActiveTripOrders();
+        let updatedBillsState = { ...settlementBillsState };
+        let matchedBillsCount = 0;
+        let parsedCash = 0;
+        let parsedCredit = 0;
+        let newCheques: any[] = [];
+        let newUpis: any[] = [];
+        let newReturns: any[] = [];
+        let detectedBoxesDelivered = 0;
+        let detectedBoxesReturned = 0;
+
+        for (const sheetName of workbook.SheetNames) {
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+
+          if (!jsonRows || jsonRows.length === 0) continue;
+
+          // Detect if this sheet has bill-wise columns
+          let headerRowIndex = -1;
+          let colMap: Record<string, number> = {};
+
+          for (let r = 0; r < Math.min(15, jsonRows.length); r++) {
+            const row = jsonRows[r];
+            if (!Array.isArray(row)) continue;
+            const strRow = row.map(c => String(c).trim().toLowerCase());
+
+            const hasBill = strRow.some(c => c.includes('bill') || c.includes('order') || c.includes('inv'));
+            const hasPartyOrAmt = strRow.some(c => c.includes('party') || c.includes('customer') || c.includes('amount') || c.includes('cash') || c.includes('total') || c.includes('रोकड़'));
+            if (hasBill && hasPartyOrAmt) {
+              headerRowIndex = r;
+              strRow.forEach((c, idx) => {
+                if (c.includes('bill no') || c === 'bill' || c.includes('order no') || c === '#') colMap.billNo = idx;
+                else if (c.includes('party') || c.includes('customer') || c.includes('client')) colMap.party = idx;
+                else if (c.includes('amount') || c.includes('total bill') || c === 'amt') colMap.amount = idx;
+                else if (c.includes('cash') || c.includes('रोकड़')) colMap.cash = idx;
+                else if (c.includes('cheque') || c.includes('check') || c.includes('चेक')) colMap.cheque = idx;
+                else if (c.includes('credit') || c.includes('उधारी')) colMap.credit = idx;
+                else if (c.includes('upi') || c.includes('qr') || c.includes('digital')) colMap.upi = idx;
+                else if (c.includes('status') || c.includes('delivery')) colMap.status = idx;
+                else if (c.includes('return') || c.includes('वापसी')) colMap.return = idx;
+                else if (c.includes('reason') || c.includes('remark') || c.includes('note')) colMap.reason = idx;
+              });
+              break;
+            }
+          }
+
+          if (headerRowIndex !== -1 && (colMap.billNo !== undefined || colMap.party !== undefined)) {
+            // Bill-wise table rows
+            for (let r = headerRowIndex + 1; r < jsonRows.length; r++) {
+              const row = jsonRows[r];
+              if (!row || row.length === 0) continue;
+
+              const billRaw = colMap.billNo !== undefined ? String(row[colMap.billNo] || '').trim() : '';
+              const cleanBillNo = billRaw.replace(/\D/g, '');
+              const partyRaw = colMap.party !== undefined ? String(row[colMap.party] || '').trim().toLowerCase() : '';
+
+              if (!cleanBillNo && !partyRaw) continue;
+
+              const firstCell = String(row[0] || '').toLowerCase();
+              if (firstCell.includes('total') || firstCell.includes('summary')) continue;
+
+              const matchedOrd = activeTripOrders.find(o => {
+                const oNum = o.orderNumber.replace(/\D/g, '');
+                if (cleanBillNo && oNum && (oNum === cleanBillNo || o.orderNumber.toLowerCase() === billRaw.toLowerCase())) return true;
+                if (partyRaw && o.partyName.toLowerCase().includes(partyRaw.slice(0, 15))) return true;
+                return false;
+              });
+
+              const billKey = matchedOrd ? matchedOrd.orderNumber : (billRaw || `BILL-${r}`);
+              const totalBillAmt = matchedOrd ? matchedOrd.totalBill : (colMap.amount !== undefined ? parseFloat(String(row[colMap.amount]).replace(/[^0-9.]/g, '')) || 0 : 0);
+
+              let rowCash = colMap.cash !== undefined ? parseFloat(String(row[colMap.cash]).replace(/[^0-9.]/g, '')) : NaN;
+              let rowCredit = colMap.credit !== undefined ? parseFloat(String(row[colMap.credit]).replace(/[^0-9.]/g, '')) : NaN;
+              let rowUpi = colMap.upi !== undefined ? parseFloat(String(row[colMap.upi]).replace(/[^0-9.]/g, '')) : NaN;
+              let rowChequeAmt = colMap.cheque !== undefined ? parseFloat(String(row[colMap.cheque]).replace(/[^0-9.]/g, '')) : NaN;
+              let rowChequeInfo = colMap.cheque !== undefined ? String(row[colMap.cheque] || '').trim() : '';
+
+              if (colMap.cash !== undefined && String(row[colMap.cash]).trim().toUpperCase() === 'C') {
+                rowCash = totalBillAmt;
+              }
+
+              let statusVal = 'Delivered';
+              if (colMap.status !== undefined) {
+                const sRaw = String(row[colMap.status] || '').toLowerCase();
+                if (sRaw.includes('ret') || sRaw.includes('वापस')) statusVal = 'Returned';
+                else if (sRaw.includes('part') || sRaw.includes('आंशिक')) statusVal = 'Partial';
+                else if (sRaw.includes('canc') || sRaw.includes('रद्द')) statusVal = 'Cancelled';
+              }
+
+              let payMode = 'CASH';
+              if (!isNaN(rowCredit) && rowCredit > 0 && (isNaN(rowCash) || rowCash === 0)) payMode = 'CREDIT';
+              else if (!isNaN(rowChequeAmt) && rowChequeAmt > 0) payMode = 'CHEQUE';
+              else if (!isNaN(rowUpi) && rowUpi > 0) payMode = 'UPI';
+
+              let paidAmt = !isNaN(rowCash) && rowCash > 0 ? rowCash : (payMode === 'CASH' && statusVal === 'Delivered' ? totalBillAmt : 0);
+              if (!isNaN(rowCash) && rowCash > 0) parsedCash += rowCash;
+              else if (payMode === 'CASH' && statusVal === 'Delivered') parsedCash += totalBillAmt;
+
+              if (!isNaN(rowCredit) && rowCredit > 0) parsedCredit += rowCredit;
+              else if (payMode === 'CREDIT') parsedCredit += totalBillAmt;
+
+              if (rowChequeInfo && (rowChequeInfo.length > 2 || (!isNaN(rowChequeAmt) && rowChequeAmt > 0))) {
+                newCheques.push({
+                  id: `chq-${Date.now()}-${r}`,
+                  chequeNo: rowChequeInfo.match(/\d{5,8}/)?.[0] || rowChequeInfo,
+                  bankName: rowChequeInfo.includes('HDFC') ? 'HDFC' : rowChequeInfo.includes('SBI') ? 'SBI' : 'Bank',
+                  partyName: matchedOrd?.partyName || partyRaw || 'Retail Party',
+                  amount: !isNaN(rowChequeAmt) && rowChequeAmt > 0 ? rowChequeAmt : totalBillAmt
+                });
+              }
+
+              if (!isNaN(rowUpi) && rowUpi > 0) {
+                newUpis.push({
+                  id: `upi-${Date.now()}-${r}`,
+                  upiRef: `UPI-${cleanBillNo || r}`,
+                  partyName: matchedOrd?.partyName || partyRaw || 'Retail Party',
+                  amount: rowUpi
+                });
+              }
+
+              if (statusVal === 'Returned' || (colMap.return !== undefined && String(row[colMap.return]).trim().length > 0)) {
+                const retAmt = colMap.return !== undefined ? parseFloat(String(row[colMap.return]).replace(/[^0-9.]/g, '')) || totalBillAmt : totalBillAmt;
+                const retReason = colMap.reason !== undefined ? String(row[colMap.reason] || 'Party Shop Closed') : 'Party Shop Closed';
+                newReturns.push({
+                  id: `ret-${Date.now()}-${r}`,
+                  partyName: matchedOrd?.partyName || partyRaw || 'Retail Party',
+                  cartons: 1,
+                  amount: retAmt,
+                  reason: retReason
+                });
+              }
+
+              updatedBillsState[billKey] = {
+                orderId: matchedOrd?.id || billKey,
+                orderNumber: billKey,
+                partyName: matchedOrd?.partyName || partyRaw,
+                totalBill: totalBillAmt,
+                deliveryStatus: statusVal,
+                paymentMode: payMode,
+                paidAmount: paidAmt,
+                pendingAmount: Math.max(0, totalBillAmt - paidAmt),
+                notes: 'Imported from Evening Sheet'
+              };
+              matchedBillsCount++;
+            }
+          } else {
+            // Check for summary rows (e.g. from exported Reconciliation Summary)
+            for (let r = 0; r < jsonRows.length; r++) {
+              const row = jsonRows[r];
+              if (!row || row.length === 0) continue;
+              const rowText = row.map(c => String(c).toLowerCase()).join(' ');
+
+              if (rowText.includes('cash collected') || rowText.includes('रोकड़')) {
+                const lastNum = row.slice(1).map(c => parseFloat(String(c).replace(/[^0-9.]/g, ''))).filter(n => !isNaN(n) && n > 0).pop();
+                if (lastNum) parsedCash = lastNum;
+              }
+              if (rowText.includes('credit allowed') || rowText.includes('उधारी')) {
+                const lastNum = row.slice(1).map(c => parseFloat(String(c).replace(/[^0-9.]/g, ''))).filter(n => !isNaN(n) && n > 0).pop();
+                if (lastNum) parsedCredit = lastNum;
+              }
+              if (rowText.includes('boxes delivered') || rowText.includes('वितरित बॉक्स')) {
+                const lastNum = row.slice(1).map(c => parseInt(String(c).replace(/\D/g, ''))).filter(n => !isNaN(n) && n > 0).pop();
+                if (lastNum) detectedBoxesDelivered = lastNum;
+              }
+              if (rowText.includes('boxes returned') || rowText.includes('वापस बॉक्स')) {
+                const lastNum = row.slice(1).map(c => parseInt(String(c).replace(/\D/g, ''))).filter(n => !isNaN(n) && n > 0).pop();
+                if (lastNum) detectedBoxesReturned = lastNum;
+              }
+
+              if (rowText.includes('cheque') && (rowText.includes('hdfc') || rowText.includes('sbi') || row.length >= 4)) {
+                const amt = row.map(c => parseFloat(String(c).replace(/[^0-9.]/g, ''))).filter(n => !isNaN(n) && n > 0).pop();
+                if (amt) {
+                  newCheques.push({
+                    id: `chq-${Date.now()}-${r}`,
+                    chequeNo: String(row[1] || `CHQ-${r}`),
+                    bankName: String(row[2] || 'HDFC Bank'),
+                    partyName: String(row[3] || 'Retail Party'),
+                    amount: amt
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        setSettlementBillsState(updatedBillsState);
+        if (parsedCash > 0) {
+          setSettlementActualCash(String(parsedCash));
+          handleAutoBreakdownDenominations(parsedCash);
+        }
+        if (parsedCredit > 0) setSettlementCreditAllowed(String(parsedCredit));
+        if (newCheques.length > 0) setChequesList(newCheques);
+        if (newUpis.length > 0) setUpisList(newUpis);
+        if (newReturns.length > 0) setReturnsList(newReturns);
+        if (detectedBoxesDelivered > 0) setSettlementBoxesDelivered(String(detectedBoxesDelivered));
+        if (detectedBoxesReturned > 0) setSettlementBoxesReturned(String(detectedBoxesReturned));
+
+        const msg = `✅ Excel फ़ाइल "${file.name}" सफलतापूर्वक इम्पोर्ट हुई!\n` +
+          `• कुल अपडेटेड बिल: ${matchedBillsCount || activeTripOrders.length}\n` +
+          `• कुल रोकड़ (Cash): ₹${(parsedCash || Number(settlementActualCash) || 0).toLocaleString('en-IN')}\n` +
+          `• कुल उधारी (Credit): ₹${(parsedCredit || Number(settlementCreditAllowed) || 0).toLocaleString('en-IN')}\n` +
+          `• चेक (Cheques): ${newCheques.length} | UPI: ${newUpis.length} | रिटर्न: ${newReturns.length}\n` +
+          `सारा हिसाब व कैलकुलेशन ऑटोमैटिक अपडेट हो गया है!`;
+        setSettlementSavedSuccess(msg);
+        alert(msg);
+      } catch (err: any) {
+        alert('Excel Import Error: ' + (err.message || 'फाइल पढ़ने में समस्या आई'));
+      }
+    };
+
+    if (isExcel) {
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.readAsText(file);
+    }
+    e.target.value = '';
+  };
+
+  // Cash Deposit Envelope Slip Print Handler
+  const handlePrintEnvelopeSlip = () => {
+    const printContent = document.getElementById('printable-cash-envelope-slip');
+    if (!printContent) {
+      window.print();
+      return;
+    }
+
+    const printIframe = document.createElement('iframe');
+    printIframe.setAttribute('style', 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;');
+    document.body.appendChild(printIframe);
+
+    const doc = printIframe.contentWindow?.document;
+    if (!doc) {
+      window.print();
+      return;
+    }
+
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8" />
+          <title>Cash Deposit Envelope Slip - Load #${selectedTripLoadNo === 'ALL' ? '188' : selectedTripLoadNo}</title>
+          <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+          <script src="https://cdn.tailwindcss.com"></script>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 8mm;
+            }
+            * {
+              box-sizing: border-box;
+            }
+            html, body {
+              width: 100% !important;
+              background: #ffffff !important;
+              color: #000000 !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              font-size: 11px;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            table {
+              width: 100% !important;
+              border-collapse: collapse !important;
+            }
+            th, td {
+              border: 1px solid #000000 !important;
+              color: #000000 !important;
+              padding: 4px 6px !important;
+            }
+            th {
+              background-color: #f1f5f9 !important;
+              font-weight: 800 !important;
+            }
+          </style>
+        </head>
+        <body>
+          <div style="padding: 10px; max-width: 700px; margin: 0 auto;">
+            ${printContent.outerHTML}
+          </div>
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    setTimeout(() => {
+      printIframe.contentWindow?.focus();
+      printIframe.contentWindow?.print();
+      setTimeout(() => {
+        if (document.body.contains(printIframe)) {
+          document.body.removeChild(printIframe);
+        }
+      }, 3000);
+    }, 600);
+  };
+
+  // Cash Deposit Envelope Slip PDF Download Handler
+  const handleDownloadEnvelopeSlipPDF = async () => {
+    const element = document.getElementById('printable-cash-envelope-slip');
+    if (!element) {
+      alert('Envelope slip nahi mila');
+      return;
+    }
+    setIsDownloadingEnvelopePdf(true);
+    let tempWrapper: HTMLElement | null = null;
+    try {
+      const loadStr = selectedTripLoadNo === 'ALL' ? '188' : selectedTripLoadNo;
+      const vanStr = (tripEditVan || 'V1').replace(/[^a-zA-Z0-9]/g, '_');
+
+      tempWrapper = document.createElement('div');
+      tempWrapper.style.position = 'fixed';
+      tempWrapper.style.top = '0';
+      tempWrapper.style.left = '0';
+      tempWrapper.style.width = '700px';
+      tempWrapper.style.zIndex = '-9999';
+      tempWrapper.style.background = '#ffffff';
+      document.body.appendChild(tempWrapper);
+
+      const clone = element.cloneNode(true) as HTMLElement;
+      clone.style.width = '700px';
+      clone.style.margin = '0 auto';
+      clone.style.background = '#ffffff';
+      tempWrapper.appendChild(clone);
+
+      const canvas = await html2canvas(clone, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+        compress: true
+      });
+
+      const imgWidthMm = 190;
+      const imgHeightMm = (canvas.height * imgWidthMm) / canvas.width;
+      pdf.addImage(imgData, 'JPEG', 10, 10, imgWidthMm, Math.min(imgHeightMm, 277));
+      pdf.save(`Cash_Deposit_Envelope_Slip_Load${loadStr}_${vanStr}.pdf`);
+    } catch (err: any) {
+      alert('PDF generation error: ' + err.message);
+    } finally {
+      if (tempWrapper && document.body.contains(tempWrapper)) {
+        document.body.removeChild(tempWrapper);
+      }
+      setIsDownloadingEnvelopePdf(false);
+    }
   };
 
   // WinOmkar Sales Invoice Range Filtering & Graphical Print
@@ -5066,6 +5522,40 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                         })}
                       </select>
 
+                      {/* Hidden File Input for Evening Settlement Excel/CSV Import */}
+                      <input
+                        type="file"
+                        ref={eveningImportInputRef}
+                        onChange={handleImportEveningSettlement}
+                        accept=".xlsx,.xls,.xlsm,.xlsb,.csv,.tsv"
+                        className="hidden"
+                      />
+
+                      {/* Import Evening Settlement Excel / CSV */}
+                      <button
+                        type="button"
+                        onClick={() => eveningImportInputRef.current?.click()}
+                        className="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-xl shadow-sm flex items-center gap-1.5 active:scale-95"
+                        title="भरी हुई Excel/CSV शीट से रोकड़, चेक व डिलीवरी स्टेटस ऑटोमैटिक इम्पोर्ट करें"
+                      >
+                        <i className="fa-solid fa-file-import text-blue-200"></i>
+                        <span>📥 Import Excel / CSV</span>
+                      </button>
+
+                      {/* Cash Deposit Envelope Slip (लिफाफा रसीद) */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleAutoBreakdownDenominations();
+                          setIsEnvelopeSlipModalOpen(true);
+                        }}
+                        className="px-3.5 py-1.5 bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 hover:from-amber-700 hover:to-orange-800 text-white text-xs font-black rounded-xl shadow-md flex items-center gap-1.5 active:scale-95 animate-pulse"
+                        title="बैंक / कैशियर लिफाफे पर चिपकाने हेतु रोकड़ जमा रसीद (Envelope Slip)"
+                      >
+                        <i className="fa-solid fa-envelope-open-text text-amber-200"></i>
+                        <span>✉️ Cash Envelope Slip (लिफाफा रसीद)</span>
+                      </button>
+
                       {/* Export Evening Settlement to Excel (.xlsx) */}
                       <button
                         type="button"
@@ -5631,13 +6121,23 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                             </h3>
                             <p className="text-[10px] text-slate-500">प्रत्येक दूकानदार का पेमेंट मोड व डिलीवरी स्टेटस अपडेट करें</p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleMarkAllDelivered(tripOrders)}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 active:scale-95"
-                          >
-                            <i className="fa-solid fa-check-double"></i> ⚡ Mark All Delivered & Paid (सभी सफल)
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => eveningImportInputRef.current?.click()}
+                              className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 active:scale-95"
+                              title="भरी हुई Excel/CSV से सीधे बिल अपडेट करें"
+                            >
+                              <i className="fa-solid fa-file-import text-blue-600"></i> 📥 Import Excel File
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMarkAllDelivered(tripOrders)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 active:scale-95"
+                            >
+                              <i className="fa-solid fa-check-double"></i> ⚡ Mark All Delivered & Paid (सभी सफल)
+                            </button>
+                          </div>
                         </div>
 
                         <div className="overflow-x-auto max-h-72">
@@ -5965,6 +6465,364 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                 </div>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* CASH DEPOSIT ENVELOPE SLIP MODAL (रोकड़ जमा लिफाफा रसीद) */}
+      {isEnvelopeSlipModalOpen && (
+        <div id="envelope-slip-modal-backdrop" className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-fadeIn">
+          <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl p-4 sm:p-6 space-y-4 max-h-[95vh] overflow-y-auto border border-slate-200">
+            {/* Modal Controls Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3 no-print">
+              <div>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[11px] font-black uppercase mb-1">
+                  <i className="fa-solid fa-envelope-open-text text-amber-600"></i> Cash Deposit Envelope Slip
+                </div>
+                <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                  ✉️ दैनिक वैन रोकड़ जमा लिफाफा रसीद
+                </h3>
+                <p className="text-xs text-slate-500">
+                  बैंक या कैशियर काउंटर पर लिफाफे (Envelope) पर चिपकाने व जमा करने हेतु आधिकारिक रसीद
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadEnvelopeSlipPDF}
+                  disabled={isDownloadingEnvelopePdf}
+                  className="px-3.5 py-2 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 text-white text-xs font-bold rounded-xl shadow-sm flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                  title="Download Slip as PDF"
+                >
+                  <i className={`fa-solid ${isDownloadingEnvelopePdf ? 'fa-spinner fa-spin' : 'fa-file-pdf'}`}></i>
+                  {isDownloadingEnvelopePdf ? 'Creating...' : '📥 Download Slip PDF'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePrintEnvelopeSlip}
+                  className="px-3.5 py-2 bg-slate-900 hover:bg-black text-white text-xs font-black rounded-xl shadow-md flex items-center gap-1.5 active:scale-95"
+                  title="Print Slip for Cash Envelope"
+                >
+                  <i className="fa-solid fa-print text-gold-400"></i> 🖨️ Print Slip
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsEnvelopeSlipModalOpen(false)}
+                  className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center font-bold"
+                >
+                  <i className="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+            </div>
+
+            {/* Interactive Note Denomination Calculator (Hidden in Print) */}
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-2.5 no-print">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-amber-950 uppercase flex items-center gap-1.5">
+                  <i className="fa-solid fa-coins text-amber-600"></i> नोटों का विवरण (Cash Denomination Breakdown)
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleAutoBreakdownDenominations()}
+                    className="text-[10px] px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 font-bold rounded-lg transition-all"
+                  >
+                    ⚡ Auto-Fill Notes (₹{Number(settlementActualCash || 0).toLocaleString('en-IN')})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEnvelopeDenominations({ n500: '', n200: '', n100: '', n50: '', n20: '', n10: '', coins: '' })}
+                    className="text-[10px] px-2 py-1 bg-white hover:bg-rose-50 text-rose-700 border border-slate-300 rounded-lg"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2 text-xs">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600">₹500 Notes</label>
+                  <input
+                    type="number"
+                    value={envelopeDenominations.n500}
+                    onChange={(e) => setEnvelopeDenominations({ ...envelopeDenominations, n500: e.target.value })}
+                    placeholder="0"
+                    className="w-full p-1.5 border border-amber-300 rounded-lg font-mono font-bold text-center bg-white"
+                  />
+                  <span className="block text-[9px] text-right font-mono text-slate-500">= ₹{((Number(envelopeDenominations.n500) || 0) * 500).toLocaleString('en-IN')}</span>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600">₹200 Notes</label>
+                  <input
+                    type="number"
+                    value={envelopeDenominations.n200}
+                    onChange={(e) => setEnvelopeDenominations({ ...envelopeDenominations, n200: e.target.value })}
+                    placeholder="0"
+                    className="w-full p-1.5 border border-amber-300 rounded-lg font-mono font-bold text-center bg-white"
+                  />
+                  <span className="block text-[9px] text-right font-mono text-slate-500">= ₹{((Number(envelopeDenominations.n200) || 0) * 200).toLocaleString('en-IN')}</span>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600">₹100 Notes</label>
+                  <input
+                    type="number"
+                    value={envelopeDenominations.n100}
+                    onChange={(e) => setEnvelopeDenominations({ ...envelopeDenominations, n100: e.target.value })}
+                    placeholder="0"
+                    className="w-full p-1.5 border border-amber-300 rounded-lg font-mono font-bold text-center bg-white"
+                  />
+                  <span className="block text-[9px] text-right font-mono text-slate-500">= ₹{((Number(envelopeDenominations.n100) || 0) * 100).toLocaleString('en-IN')}</span>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600">₹50 Notes</label>
+                  <input
+                    type="number"
+                    value={envelopeDenominations.n50}
+                    onChange={(e) => setEnvelopeDenominations({ ...envelopeDenominations, n50: e.target.value })}
+                    placeholder="0"
+                    className="w-full p-1.5 border border-amber-300 rounded-lg font-mono font-bold text-center bg-white"
+                  />
+                  <span className="block text-[9px] text-right font-mono text-slate-500">= ₹{((Number(envelopeDenominations.n50) || 0) * 50).toLocaleString('en-IN')}</span>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600">₹20 Notes</label>
+                  <input
+                    type="number"
+                    value={envelopeDenominations.n20}
+                    onChange={(e) => setEnvelopeDenominations({ ...envelopeDenominations, n20: e.target.value })}
+                    placeholder="0"
+                    className="w-full p-1.5 border border-amber-300 rounded-lg font-mono font-bold text-center bg-white"
+                  />
+                  <span className="block text-[9px] text-right font-mono text-slate-500">= ₹{((Number(envelopeDenominations.n20) || 0) * 20).toLocaleString('en-IN')}</span>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600">₹10 Notes</label>
+                  <input
+                    type="number"
+                    value={envelopeDenominations.n10}
+                    onChange={(e) => setEnvelopeDenominations({ ...envelopeDenominations, n10: e.target.value })}
+                    placeholder="0"
+                    className="w-full p-1.5 border border-amber-300 rounded-lg font-mono font-bold text-center bg-white"
+                  />
+                  <span className="block text-[9px] text-right font-mono text-slate-500">= ₹{((Number(envelopeDenominations.n10) || 0) * 10).toLocaleString('en-IN')}</span>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600">सिक्के (Coins)</label>
+                  <input
+                    type="number"
+                    value={envelopeDenominations.coins}
+                    onChange={(e) => setEnvelopeDenominations({ ...envelopeDenominations, coins: e.target.value })}
+                    placeholder="0"
+                    className="w-full p-1.5 border border-amber-300 rounded-lg font-mono font-bold text-center bg-white"
+                  />
+                  <span className="block text-[9px] text-right font-mono text-slate-500">= ₹{(Number(envelopeDenominations.coins) || 0).toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+
+              {(() => {
+                const totalDenom = (Number(envelopeDenominations.n500) || 0) * 500 +
+                  (Number(envelopeDenominations.n200) || 0) * 200 +
+                  (Number(envelopeDenominations.n100) || 0) * 100 +
+                  (Number(envelopeDenominations.n50) || 0) * 50 +
+                  (Number(envelopeDenominations.n20) || 0) * 20 +
+                  (Number(envelopeDenominations.n10) || 0) * 10 +
+                  (Number(envelopeDenominations.coins) || 0);
+                const actualCash = Number(settlementActualCash) || 0;
+                const match = Math.abs(totalDenom - actualCash) < 1;
+
+                return (
+                  <div className="flex items-center justify-between pt-1 border-t border-amber-200/60 text-xs">
+                    <span className="font-bold text-slate-700">
+                      नोटों का कुल जोड़: <strong className="font-mono text-sm text-slate-900">₹{totalDenom.toLocaleString('en-IN')}</strong> / कुल रोकड़: ₹{actualCash.toLocaleString('en-IN')}
+                    </span>
+                    <span className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] ${match ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                      {match ? '✅ नोटों की गिनती रोकड़ से 100% मैच है' : `⚠️ अंतर: ₹${(totalDenom - actualCash).toLocaleString('en-IN')}`}
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* THE PRINTABLE CASH DEPOSIT ENVELOPE SLIP (VOUCHER) */}
+            <div
+              id="printable-cash-envelope-slip"
+              className="p-4 sm:p-5 bg-white text-black font-sans space-y-3 border-2 border-dashed border-black rounded-xl shadow-sm max-w-2xl mx-auto"
+            >
+              {/* Cutting Line Banner */}
+              <div className="flex items-center justify-between border-b-2 border-dashed border-black pb-1.5 text-[10px] font-black text-black uppercase tracking-wider">
+                <span>✂️ CUT & ATTACH TO CASH ENVELOPE (कट करके रोकड़ लिफाफे पर चिपकाएं)</span>
+                <span>DEPOSIT SLIP</span>
+              </div>
+
+              {/* Company & Header */}
+              <div className="flex justify-between items-start pt-1">
+                <div>
+                  <h2 className="text-base font-black text-black uppercase font-serif tracking-tight leading-tight">
+                    VISTARAN HEALTH CARE SERVICES PVT.LTD.
+                  </h2>
+                  <div className="text-[10px] font-bold text-black">MUMBAI: 400079</div>
+                  <div className="inline-block mt-1 px-2 py-0.5 bg-slate-100 border border-black font-mono font-black text-[11px] uppercase">
+                    VAN CASH DEPOSIT ENVELOPE SLIP (दैनिक रोकड़ जमा रसीद)
+                  </div>
+                </div>
+                <div className="text-right text-[10px] font-bold text-black space-y-0.5">
+                  <div>Date: <strong className="font-mono">{new Date().toLocaleDateString('en-GB')}</strong></div>
+                  <div>Time: <strong className="font-mono">{new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</strong></div>
+                  <div>Load No: <strong className="font-mono font-black">#{selectedTripLoadNo === 'ALL' ? '188' : selectedTripLoadNo}</strong></div>
+                  <div>Van No: <strong className="font-mono font-black">{tripEditVan}</strong></div>
+                </div>
+              </div>
+
+              {/* Crew Snapshot */}
+              <div className="border border-black p-2 bg-slate-50 text-[10px] grid grid-cols-3 gap-2">
+                <div>
+                  <span className="text-[8.5px] font-bold text-slate-600 block uppercase">Driver (चालक):</span>
+                  <strong className="text-black font-black truncate block">{tripEditDriver}</strong>
+                </div>
+                <div>
+                  <span className="text-[8.5px] font-bold text-slate-600 block uppercase">Loader (LDR):</span>
+                  <strong className="text-black font-black truncate block">{tripEditLoader}</strong>
+                </div>
+                <div>
+                  <span className="text-[8.5px] font-bold text-slate-600 block uppercase">Cashier (रोकड़िया):</span>
+                  <strong className="text-black font-black truncate block">{tripEditCashier}</strong>
+                </div>
+              </div>
+
+              {/* BIG CASH HIGHLIGHT BOX */}
+              <div className="border-2 border-black p-2.5 bg-slate-100 text-center rounded">
+                <span className="text-[9px] font-black text-slate-700 block uppercase tracking-wider">
+                  TOTAL CASH ENCLOSED IN THIS ENVELOPE (लिफाफे में कुल नकद रोकड़)
+                </span>
+                <div className="text-2xl sm:text-3xl font-black font-mono text-black my-0.5 tracking-tight">
+                  ₹{(Number(settlementActualCash) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-[10px] font-black text-black italic">
+                  ({numberToIndianWords(Number(settlementActualCash) || 0)})
+                </div>
+              </div>
+
+              {/* Denominations & Reconciliation Side-by-Side */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                {/* Note Denomination Breakdown */}
+                <div className="border border-black p-2 bg-white">
+                  <span className="font-black text-black uppercase block border-b border-black pb-1 mb-1 text-[9px]">
+                    नोटों का विवरण (Cash Denomination)
+                  </span>
+                  <table className="w-full text-left border-collapse text-[9.5px]">
+                    <tbody>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-0.5 font-bold">₹500 x {envelopeDenominations.n500 || '-'}</td>
+                        <td className="py-0.5 text-right font-mono font-bold">₹{((Number(envelopeDenominations.n500) || 0) * 500).toLocaleString('en-IN')}</td>
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-0.5 font-bold">₹200 x {envelopeDenominations.n200 || '-'}</td>
+                        <td className="py-0.5 text-right font-mono font-bold">₹{((Number(envelopeDenominations.n200) || 0) * 200).toLocaleString('en-IN')}</td>
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-0.5 font-bold">₹100 x {envelopeDenominations.n100 || '-'}</td>
+                        <td className="py-0.5 text-right font-mono font-bold">₹{((Number(envelopeDenominations.n100) || 0) * 100).toLocaleString('en-IN')}</td>
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-0.5 font-bold">₹50 x {envelopeDenominations.n50 || '-'}</td>
+                        <td className="py-0.5 text-right font-mono font-bold">₹{((Number(envelopeDenominations.n50) || 0) * 50).toLocaleString('en-IN')}</td>
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-0.5 font-bold">₹20 x {envelopeDenominations.n20 || '-'}</td>
+                        <td className="py-0.5 text-right font-mono font-bold">₹{((Number(envelopeDenominations.n20) || 0) * 20).toLocaleString('en-IN')}</td>
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-0.5 font-bold">₹10 x {envelopeDenominations.n10 || '-'}</td>
+                        <td className="py-0.5 text-right font-mono font-bold">₹{((Number(envelopeDenominations.n10) || 0) * 10).toLocaleString('en-IN')}</td>
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="py-0.5 font-bold">Coins (सिक्के)</td>
+                        <td className="py-0.5 text-right font-mono font-bold">₹{(Number(envelopeDenominations.coins) || 0).toLocaleString('en-IN')}</td>
+                      </tr>
+                      <tr className="border-t-2 border-black font-black bg-slate-50">
+                        <td className="py-0.5 uppercase">TOTAL CASH</td>
+                        <td className="py-0.5 text-right font-mono">₹{(Number(settlementActualCash) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Other Instruments & Trip Settlement Summary */}
+                <div className="border border-black p-2 bg-white flex flex-col justify-between">
+                  <div>
+                    <span className="font-black text-black uppercase block border-b border-black pb-1 mb-1 text-[9px]">
+                      डिलीवरी व हिसाब स्थिति (Trip Settlement)
+                    </span>
+                    <div className="space-y-1 text-[9.5px]">
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">कुल बिल (Total Dispatched):</span>
+                        <strong className="font-mono">₹{(() => {
+                          const active = getActiveTripOrders();
+                          return active.reduce((s, o) => s + (o.totalBill || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+                        })()}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">लिफाफा रोकड़ (Cash):</span>
+                        <strong className="font-mono text-emerald-900">₹{(Number(settlementActualCash) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">चेक संग्रह ({chequesList.length} Cheques):</span>
+                        <strong className="font-mono">₹{chequesList.reduce((s, c) => s + (Number(c.amount) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">डिजिटल / UPI ({upisList.length} UPIs):</span>
+                        <strong className="font-mono">₹{upisList.reduce((s, u) => s + (Number(u.amount) || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">स्वीकृत उधारी (Credit):</span>
+                        <strong className="font-mono">₹{(Number(settlementCreditAllowed) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">वापसी माल (Returns):</span>
+                        <strong className="font-mono">₹{(returnsList.reduce((s, r) => s + (Number(r.amount) || 0), 0) + (Number(settlementReturnAmount) || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 pt-1.5 border-t border-black text-center">
+                    <span className="px-2 py-0.5 rounded border border-black font-black text-[9px] bg-slate-100 inline-block uppercase">
+                      ✅ हिसाब व रोकड़ सत्यापित (VERIFIED & AUDITED)
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3 Signatures */}
+              <div className="grid grid-cols-3 gap-2 pt-3 border-t-2 border-black text-center text-[10px]">
+                <div>
+                  <div className="h-6"></div>
+                  <div className="border-t border-dashed border-black pt-1">
+                    <strong className="block text-black font-black">1. चालक (Driver)</strong>
+                    <span className="text-[9px] text-slate-600 font-bold block">{tripEditDriver}</span>
+                    <span className="text-[8px] text-slate-500 block">रोकड़ सुपुर्दगी (Handed Over)</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="h-6"></div>
+                  <div className="border-t border-dashed border-black pt-1">
+                    <strong className="block text-black font-black">2. रोकड़िया (Cashier)</strong>
+                    <span className="text-[9px] text-slate-600 font-bold block">{tripEditCashier}</span>
+                    <span className="text-[8px] text-slate-500 block">रोकड़ प्राप्ति व गिनती (Counted)</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="h-6"></div>
+                  <div className="border-t border-dashed border-black pt-1">
+                    <strong className="block text-black font-black">3. प्रबंधक (Manager)</strong>
+                    <span className="text-[9px] text-slate-600 font-bold block">VISTARAN HEALTH CARE</span>
+                    <span className="text-[8px] text-slate-500 block">स्वीकृति व बैंक प्रेषण (Approved)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -6939,6 +7797,22 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
             overflow: visible !important;
             height: auto !important;
             max-height: none !important;
+          }
+          #printable-cash-envelope-slip, #printable-cash-envelope-slip * {
+            visibility: visible !important;
+          }
+          #printable-cash-envelope-slip {
+            position: relative !important;
+            display: block !important;
+            left: auto !important;
+            top: auto !important;
+            width: 100% !important;
+            max-width: 680px !important;
+            margin: 0 auto !important;
+            padding: 4mm !important;
+            background: white !important;
+            border: 2px dashed #000000 !important;
+            overflow: visible !important;
           }
           #printable-bulk-invoices-sheet, #printable-bulk-invoices-sheet * {
             visibility: visible !important;
