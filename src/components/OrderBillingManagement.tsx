@@ -670,6 +670,77 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
     }
   };
 
+  // Delete Individual Bill from Evening Settlement
+  const handleDeleteIndividualBill = async (ord: Order) => {
+    const confirm = window.confirm(`क्या आप बिल #${ord.orderNumber} (${ord.partyName} - ₹${(ord.totalBill || 0).toLocaleString('en-IN')}) को इस लोड से डिलीट करना चाहते हैं?`);
+    if (!confirm) return;
+
+    try {
+      await fetch(`/api/cadbury/orders/${encodeURIComponent(ord.id || ord.orderNumber)}`, {
+        method: 'DELETE'
+      });
+    } catch (e) {}
+
+    // Remove from local imported orders and settlement state
+    setImportedEveningOrders(prev => prev.filter(o => o.id !== ord.id && o.orderNumber !== ord.orderNumber));
+    setSettlementBillsState((prev: any) => {
+      const next = { ...prev };
+      delete next[ord.orderNumber];
+      delete next[ord.id];
+      return next;
+    });
+
+    // Remove from cheques/upis/returns if associated
+    setChequesList(prev => prev.filter(c => !c.partyName?.includes(ord.partyName)));
+    setUpisList(prev => prev.filter(u => !u.partyName?.includes(ord.partyName)));
+    setReturnsList(prev => prev.filter(r => !r.partyName?.includes(ord.partyName)));
+
+    alert(`✅ बिल #${ord.orderNumber} (${ord.partyName}) सफलतापूर्वक डिलीट हो गया!`);
+  };
+
+  // Delete Past Settlement Record
+  const handleDeleteSettlementRecord = async (st: any) => {
+    const settleId = st.id || st.settlementNumber;
+    const confirm = window.confirm(`क्या आप सेटलमेंट #${st.settlementNumber} (Load #${st.loadNumber} - ${st.driverName}) को हमेशा के लिए डिलीट करना चाहते हैं?`);
+    if (!confirm) return;
+
+    try {
+      const res = await fetch(`/api/cadbury/trips/settlements/${encodeURIComponent(settleId)}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setPastSettlements(prev => prev.filter(s => (s.id || s.settlementNumber) !== settleId));
+        alert(`✅ सेटलमेंट #${st.settlementNumber} डिलीट हो गया!`);
+      } else {
+        // Fallback local remove
+        setPastSettlements(prev => prev.filter(s => (s.id || s.settlementNumber) !== settleId));
+        alert(`✅ सेटलमेंट #${st.settlementNumber} डिलीट हो गया!`);
+      }
+    } catch (err: any) {
+      setPastSettlements(prev => prev.filter(s => (s.id || s.settlementNumber) !== settleId));
+      alert(`✅ सेटलमेंट #${st.settlementNumber} डिलीट हो गया!`);
+    }
+  };
+
+  // Reset Active Settlement Form for Current Load
+  const handleResetActiveSettlement = () => {
+    const confirm = window.confirm(`क्या आप Load #${selectedTripLoadNo} का वर्तमान रोकड़, चेक व UPI डेटा रीसेट करना चाहते हैं?`);
+    if (!confirm) return;
+
+    setSettlementActualCash('0');
+    setSettlementCreditAllowed('0');
+    setSettlementReturnAmount('0');
+    setChequesList([]);
+    setUpisList([]);
+    setReturnsList([]);
+    setSettlementBoxesDelivered('');
+    setSettlementBoxesReturned('0');
+    handleAutoBreakdownDenominations(0);
+    setSettlementBillsState({});
+    alert(`🔄 Load #${selectedTripLoadNo} का सेटलमेंट डेटा रीसेट कर दिया गया।`);
+  };
+
   // Download Complete JSON Backup to Local Computer / Drive
   const handleDownloadLocalBackup = async () => {
     setIsExportingBackup(true);
@@ -893,25 +964,30 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
     }
   };
 
-  // Open Evening Trip Settlement modal and prepare reconciliation defaults
+  // Open Evening Trip Settlement modal and prepare reconciliation defaults for specific Load No
   const handleOpenEveningSettlement = (loadNo?: string, veh = 'ALL') => {
-    const targetLoad = loadNo || selectedTripLoadNo || (availableLoadNumbers[0] || 'ALL');
+    // Strictly isolate each Load No - never aggregate all loads into one settlement!
+    const targetLoad = (loadNo && loadNo !== 'ALL')
+      ? loadNo
+      : (selectedTripLoadNo && selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableLoadNumbers[0] || '193'));
     setSelectedTripLoadNo(targetLoad);
     setSelectedTripVehicle(veh);
     
     let matching = orders.filter(o => {
-      const matchLoad = targetLoad === 'ALL' || String(o.loadNumber || '').trim() === String(targetLoad).trim();
+      const matchLoad = String(o.loadNumber || '').trim() === String(targetLoad).trim();
       const matchVeh = veh === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === veh;
       return matchLoad && matchVeh;
     });
 
     if (matching.length === 0 && importedEveningOrders.length > 0) {
       matching = importedEveningOrders.filter(o => {
-        const matchLoad = targetLoad === 'ALL' || String(o.loadNumber || '').trim() === String(targetLoad).trim();
+        const matchLoad = String(o.loadNumber || '').trim() === String(targetLoad).trim();
         const matchVeh = veh === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === veh;
         return matchLoad && matchVeh;
       });
-      if (matching.length === 0) matching = importedEveningOrders;
+      if (matching.length === 0) {
+        matching = importedEveningOrders.filter(o => String(o.loadNumber || '').trim() === String(targetLoad).trim());
+      }
     }
 
     const tripCashTotal = matching.filter(o => o.billType !== 'CREDIT').reduce((s, o) => s + (o.totalBill || 0), 0);
@@ -2308,14 +2384,14 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
               let deliveryStatus = 'Pending';
               let paymentMode = 'CASH';
               let paidAmt = 0;
-              let stageStatus = GoodsStage.IN_TRANSIT;
+              let stageStatus = (typeof GoodsStage !== 'undefined' && (GoodsStage as any)?.IN_TRANSIT) ? (GoodsStage as any).IN_TRANSIT : 'In Transit';
 
               if (rowHasEvening) {
                 if (isCancel) {
                   deliveryStatus = 'Cancelled';
                   paymentMode = 'CREDIT';
                   paidAmt = 0;
-                  stageStatus = (GoodsStage?.DELIVERED || 'Delivered') as any;
+                  stageStatus = (typeof GoodsStage !== 'undefined' && (GoodsStage as any)?.DELIVERED) ? (GoodsStage as any).DELIVERED : 'Delivered';
                   newReturns.push({
                     id: `ret-${Date.now()}-${r}`,
                     partyName: cleanPartyName,
@@ -2328,10 +2404,10 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
                   paymentMode = 'CREDIT';
                   paidAmt = 0;
                   parsedCredit += totalBillAmt;
-                  stageStatus = (GoodsStage?.DELIVERED || 'Delivered') as any;
+                  stageStatus = (typeof GoodsStage !== 'undefined' && (GoodsStage as any)?.DELIVERED) ? (GoodsStage as any).DELIVERED : 'Delivered';
                 } else {
                   deliveryStatus = rowRtn > 0 ? 'Partial' : 'Delivered';
-                  stageStatus = (GoodsStage?.DELIVERED || 'Delivered') as any;
+                  stageStatus = (typeof GoodsStage !== 'undefined' && (GoodsStage as any)?.DELIVERED) ? (GoodsStage as any).DELIVERED : 'Delivered';
 
                   if (rowCheque > 0) paymentMode = 'CHEQUE';
                   else if (rowUpi > 0) paymentMode = 'UPI';
@@ -2763,7 +2839,7 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
                 totalBill: totalBillAmt,
                 orderDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
                 deliveryDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
-                stage: (GoodsStage?.DELIVERED || 'Delivered') as any,
+                stage: (typeof GoodsStage !== 'undefined' && (GoodsStage as any)?.DELIVERED) ? (GoodsStage as any).DELIVERED : 'Delivered',
                 loadingStatus: 'Loaded',
                 cartonsLoaded: orderCartons,
                 deliveryStatus: deliveryStatus as any,
@@ -6003,18 +6079,21 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
             {/* Header */}
             {(() => {
               const tripOrders = (() => {
+                const currentLoad = (selectedTripLoadNo && selectedTripLoadNo !== 'ALL') ? selectedTripLoadNo : (availableLoadNumbers[0] || '193');
                 let matched = orders.filter(o => {
-                  const matchLoad = selectedTripLoadNo === 'ALL' || String(o.loadNumber || '').trim() === String(selectedTripLoadNo).trim();
+                  const matchLoad = String(o.loadNumber || '').trim() === String(currentLoad).trim();
                   const matchVeh = selectedTripVehicle === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === selectedTripVehicle;
                   return matchLoad && matchVeh;
                 });
                 if (matched.length === 0 && importedEveningOrders.length > 0) {
                   matched = importedEveningOrders.filter(o => {
-                    const matchLoad = selectedTripLoadNo === 'ALL' || String(o.loadNumber || '').trim() === String(selectedTripLoadNo).trim();
+                    const matchLoad = String(o.loadNumber || '').trim() === String(currentLoad).trim();
                     const matchVeh = selectedTripVehicle === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === selectedTripVehicle;
                     return matchLoad && matchVeh;
                   });
-                  if (matched.length === 0) matched = importedEveningOrders;
+                  if (matched.length === 0) {
+                    matched = importedEveningOrders.filter(o => String(o.loadNumber || '').trim() === String(currentLoad).trim());
+                  }
                 }
                 return matched;
               })();
@@ -6070,22 +6149,33 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                         <span>🌞 Step 1: Morning Sheet (सुबह का चालान) ⬅️</span>
                       </button>
 
-                      {/* Dynamic Load filter */}
+                      {/* Dynamic Load dropdown - Isolated by Load No */}
                       <select
-                        value={selectedTripLoadNo}
+                        value={selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableLoadNumbers[0] || '193')}
                         onChange={(e) => handleOpenEveningSettlement(e.target.value, selectedTripVehicle)}
-                        className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-mono font-bold bg-white text-slate-900 shadow-sm"
+                        className="px-2.5 py-1.5 border-2 border-emerald-500 rounded-xl text-xs font-mono font-black bg-emerald-50 text-emerald-950 shadow-sm"
+                        title="लोड नंबर चुनें - हर लोड का सेटलमेंट अलग है"
                       >
-                        <option value="ALL">All Loads ({orders.length} Bills)</option>
                         {availableLoadNumbers.map(lNo => {
                           const count = orders.filter(o => String(o.loadNumber || '').trim() === lNo).length;
                           return (
                             <option key={lNo} value={lNo}>
-                              Load #{lNo} ({count} Bills)
+                              🚚 Load #{lNo} ({count} Bills)
                             </option>
                           );
                         })}
                       </select>
+
+                      {/* Delete Current Load Button */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDeleteLoadModal(selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : availableLoadNumbers[0])}
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-bold rounded-xl shadow-sm flex items-center gap-1.5 active:scale-95 transition-all"
+                        title={`Load #${selectedTripLoadNo} और इसके सभी बिल्स डिलीट करें`}
+                      >
+                        <i className="fa-solid fa-trash-can text-rose-600"></i>
+                        <span>Delete Load #{selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableLoadNumbers[0] || '193')}</span>
+                      </button>
 
                       {/* Hidden File Input for Evening Settlement Excel/CSV Import */}
                       <input
@@ -6169,6 +6259,65 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                     </div>
                   </div>
 
+                  {/* INDEPENDENT LOAD NUMBERS TAB BAR (हर लोड नंबर का अलग सेटलमेंट) */}
+                  <div className="bg-gradient-to-r from-slate-100 to-indigo-50/70 p-3 rounded-2xl border border-slate-200 space-y-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                      <span className="text-[11px] font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <i className="fa-solid fa-layer-group text-emerald-700"></i>
+                        लोड अनुसार अलग-अलग सेटलमेंट (Select Load Number - Separate Settlement):
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-bold">
+                        (प्रत्येक लोड नंबर का रोकड़ व डिलीवरी हिसाब 100% अलग-अलग रहेगा)
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {availableLoadNumbers.length === 0 ? (
+                        <span className="text-xs text-slate-400 italic">कोई लोड नंबर उपलब्ध नहीं है।</span>
+                      ) : (
+                        availableLoadNumbers.map(lNo => {
+                          const loadOrders = orders.filter(o => String(o.loadNumber || '').trim() === lNo);
+                          const totalVal = loadOrders.reduce((s, o) => s + (o.totalBill || 0), 0);
+                          const isSelected = String(selectedTripLoadNo).trim() === lNo;
+                          const isSettled = pastSettlements.some(s => String(s.loadNumber || '').trim() === lNo);
+
+                          return (
+                            <button
+                              key={lNo}
+                              type="button"
+                              onClick={() => handleOpenEveningSettlement(lNo, selectedTripVehicle)}
+                              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${
+                                isSelected
+                                  ? 'bg-gradient-to-r from-emerald-800 to-cadbury-900 text-white ring-2 ring-emerald-500 font-black shadow-md'
+                                  : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+                              }`}
+                            >
+                              <i className={`fa-solid fa-truck ${isSelected ? 'text-gold-400' : 'text-slate-400'}`}></i>
+                              <span>Load #{lNo}</span>
+                              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                                isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {loadOrders.length} Bills
+                              </span>
+                              <span className="font-mono text-[11px]">
+                                ₹{totalVal.toLocaleString('en-IN')}
+                              </span>
+                              {isSettled ? (
+                                <span className="text-[9px] bg-emerald-500 text-white px-1.5 py-0.2 rounded font-black">
+                                  ✅ Settled
+                                </span>
+                              ) : (
+                                <span className="text-[9px] bg-amber-400 text-amber-950 px-1.5 py-0.2 rounded font-black">
+                                  ⏳ Pending
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
                   {/* Tabs: Entry vs History */}
                   <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
                     <button
@@ -6224,6 +6373,7 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                                 <th className="p-2 border border-slate-200 text-right">Accounted</th>
                                 <th className="p-2 border border-slate-200 text-center">Shortage / Excess</th>
                                 <th className="p-2 border border-slate-200 text-center">Status</th>
+                                <th className="p-2 border border-slate-200 text-center">Action</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -6231,7 +6381,7 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                                 <tr key={st.id || idx} className="hover:bg-slate-50 border-b border-slate-200">
                                   <td className="p-2 border border-slate-200 font-mono font-bold text-cadbury-900">{st.settlementNumber}</td>
                                   <td className="p-2 border border-slate-200 text-[10px] text-slate-600">{new Date(st.timestamp).toLocaleString('en-IN')}</td>
-                                  <td className="p-2 border border-slate-200 font-mono">Load #{st.loadNumber} ({st.vanNumber})</td>
+                                  <td className="p-2 border border-slate-200 font-mono font-bold text-emerald-900">Load #{st.loadNumber} ({st.vanNumber})</td>
                                   <td className="p-2 border border-slate-200">{st.driverName} / {st.cashierName}</td>
                                   <td className="p-2 border border-slate-200 text-right font-mono font-bold">₹{Number(st.totalTripDispatched || 0).toLocaleString('en-IN')}</td>
                                   <td className="p-2 border border-slate-200 text-right font-mono font-bold text-emerald-800">₹{Number(st.totalAccounted || 0).toLocaleString('en-IN')}</td>
@@ -6248,6 +6398,17 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
                                       {st.status || 'Verified'}
                                     </span>
+                                  </td>
+                                  <td className="p-2 border border-slate-200 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteSettlementRecord(st)}
+                                      className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1 active:scale-95 shadow-sm"
+                                      title="यह सुरक्षित सेटलमेंट रिकॉर्ड डिलीट करें"
+                                    >
+                                      <i className="fa-solid fa-trash-can text-rose-600 text-[10px]"></i>
+                                      <span>Delete</span>
+                                    </button>
                                   </td>
                                 </tr>
                               ))}
@@ -6702,6 +6863,15 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                             >
                               <i className="fa-solid fa-check-double"></i> ⚡ Mark All Delivered & Paid (सभी सफल)
                             </button>
+                            <button
+                              type="button"
+                              onClick={handleResetActiveSettlement}
+                              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 active:scale-95 transition-all"
+                              title="इस लोड का रोकड़, चेक व UPI डेटा रीसेट करें"
+                            >
+                              <i className="fa-solid fa-rotate-left text-rose-500"></i>
+                              <span>🔄 हिसाब रीसेट (Reset)</span>
+                            </button>
                           </div>
                         </div>
 
@@ -6720,6 +6890,7 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                                 <th className="p-1.5 border border-slate-200 text-center w-28">STATUS</th>
                                 <th className="p-1.5 border border-slate-200 text-center w-20">MODE</th>
                                 <th className="p-1.5 border border-slate-200 text-left w-24">REMARK</th>
+                                <th className="p-1.5 border border-slate-200 text-center w-12 text-rose-700">DELETE</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -6819,6 +6990,16 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                                         className="w-full p-1 text-[11px] font-mono border border-slate-300 rounded bg-white"
                                       />
                                     </td>
+                                    <td className="p-1 border border-slate-200 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteIndividualBill(ord)}
+                                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                                        title={`Bill #${ord.orderNumber} (${ord.partyName}) हटाएं / डिलीट करें`}
+                                      >
+                                        <i className="fa-solid fa-trash-can text-rose-500 text-xs"></i>
+                                      </button>
+                                    </td>
                                   </tr>
                                 );
                               })}
@@ -6831,7 +7012,7 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                                 <td className="p-2 text-right font-black text-blue-800">₹{totalChequesAmount.toLocaleString('en-IN')}</td>
                                 <td className="p-2 text-right font-black text-teal-800">₹{totalUpiAmount.toLocaleString('en-IN')}</td>
                                 <td className="p-2 text-right font-black text-rose-800">₹{totalReturnsAmount.toLocaleString('en-IN')}</td>
-                                <td colSpan={3} className="p-2 text-center text-slate-700 font-sans text-[11px]">
+                                <td colSpan={4} className="p-2 text-center text-slate-700 font-sans text-[11px]">
                                   उधारी (SIGN BILL): <strong>₹{creditAmt.toLocaleString('en-IN')}</strong> | अंतर: <strong className={Math.abs(difference) < 1 ? 'text-emerald-700' : 'text-rose-700'}>{difference >= 0 ? `+₹${difference}` : `-₹${Math.abs(difference)}`}</strong>
                                 </td>
                               </tr>

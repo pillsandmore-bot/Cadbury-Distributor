@@ -799,6 +799,51 @@ async function startServer() {
     res.json({ success: true, settlement: newSettlement });
   });
 
+  // Delete Trip Settlement by ID or settlementNumber
+  app.delete("/api/cadbury/trips/settlements/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!store.tripSettlements) store.tripSettlements = [];
+      const beforeCount = store.tripSettlements.length;
+      store.tripSettlements = store.tripSettlements.filter(s => s.id !== id && s.settlementNumber !== id);
+
+      if (store.tripSettlements.length === beforeCount) {
+        return res.status(404).json({ error: "Settlement record nahi mila" });
+      }
+
+      saveStore();
+      io.emit("settlement_updated", store.tripSettlements);
+      console.log(`🗑️ Deleted trip settlement ID: ${id}`);
+      res.json({ success: true, message: "Settlement record safaltapoorvak delete ho gaya." });
+    } catch (err: any) {
+      res.status(500).json({ error: "Settlement delete karne me samasya: " + err.message });
+    }
+  });
+
+  // Delete Individual Order / Bill by ID or orderNumber
+  app.delete("/api/cadbury/orders/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const orderToDelete = store.orders.find(o => o.id === id || o.orderNumber === id);
+      if (!orderToDelete) {
+        return res.status(404).json({ error: "Order / Bill nahi mila" });
+      }
+
+      store.orders = store.orders.filter(o => o.id !== orderToDelete.id);
+      if (Array.isArray(store.loaderTasks)) {
+        store.loaderTasks = store.loaderTasks.filter(t => t.orderId !== orderToDelete.id);
+      }
+
+      saveStore();
+      io.emit("order_updated", store.orders);
+      if (store.loaderTasks) io.emit("loader_updated", store.loaderTasks);
+      console.log(`🗑️ Deleted order: ${orderToDelete.orderNumber} (${orderToDelete.partyName})`);
+      res.json({ success: true, message: `Bill #${orderToDelete.orderNumber} delete ho gaya.` });
+    } catch (err: any) {
+      res.status(500).json({ error: "Order delete karne me samasya: " + err.message });
+    }
+  });
+
   // 8. Loader Task Update
   app.get("/api/cadbury/loader-tasks", (req, res) => {
     res.json(store.loaderTasks);
