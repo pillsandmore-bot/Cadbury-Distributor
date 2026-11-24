@@ -78,11 +78,15 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
     };
   }>({});
   const [isSavingTripEntries, setIsSavingTripEntries] = useState<boolean>(false);
+  const [importedEveningOrders, setImportedEveningOrders] = useState<Order[]>([]);
 
   // Dynamic Available Load Numbers from current orders
   const availableLoadNumbers = useMemo(() => {
     const setOfLoads = new Set<string>();
     orders.forEach(o => {
+      if (o.loadNumber) setOfLoads.add(String(o.loadNumber).trim());
+    });
+    importedEveningOrders.forEach(o => {
       if (o.loadNumber) setOfLoads.add(String(o.loadNumber).trim());
     });
     const sorted = Array.from(setOfLoads).sort((a, b) => {
@@ -92,7 +96,7 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
       return a.localeCompare(b);
     });
     return sorted;
-  }, [orders]);
+  }, [orders, importedEveningOrders]);
 
   // Load Deletion State
   const [isDeleteLoadModalOpen, setIsDeleteLoadModalOpen] = useState<boolean>(false);
@@ -888,22 +892,33 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
   };
 
   // Open Evening Trip Settlement modal and prepare reconciliation defaults
-  const handleOpenEveningSettlement = (loadNo = '188', veh = 'ALL') => {
-    setSelectedTripLoadNo(loadNo);
+  const handleOpenEveningSettlement = (loadNo?: string, veh = 'ALL') => {
+    const targetLoad = loadNo || selectedTripLoadNo || (availableLoadNumbers[0] || 'ALL');
+    setSelectedTripLoadNo(targetLoad);
     setSelectedTripVehicle(veh);
-    const matching = orders.filter(o => {
-      const matchLoad = loadNo === 'ALL' || (o.loadNumber || '188') === loadNo;
+    
+    let matching = orders.filter(o => {
+      const matchLoad = targetLoad === 'ALL' || String(o.loadNumber || '').trim() === String(targetLoad).trim();
       const matchVeh = veh === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === veh;
       return matchLoad && matchVeh;
     });
+
+    if (matching.length === 0 && importedEveningOrders.length > 0) {
+      matching = importedEveningOrders.filter(o => {
+        const matchLoad = targetLoad === 'ALL' || String(o.loadNumber || '').trim() === String(targetLoad).trim();
+        const matchVeh = veh === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === veh;
+        return matchLoad && matchVeh;
+      });
+      if (matching.length === 0) matching = importedEveningOrders;
+    }
 
     const tripCashTotal = matching.filter(o => o.billType !== 'CREDIT').reduce((s, o) => s + (o.totalBill || 0), 0);
     const tripCreditTotal = matching.filter(o => o.billType === 'CREDIT').reduce((s, o) => s + (o.totalBill || 0), 0);
     const tripBoxesTotal = matching.reduce((s, o) => s + (o.totalCartons || 0), 0);
 
-    setSettlementActualCash(tripCashTotal > 0 ? String(tripCashTotal) : '61700');
-    setSettlementCreditAllowed(tripCreditTotal > 0 ? String(tripCreditTotal) : '91722');
-    setSettlementBoxesDelivered(tripBoxesTotal > 0 ? String(tripBoxesTotal) : '54');
+    setSettlementActualCash(tripCashTotal > 0 ? String(tripCashTotal) : '0');
+    setSettlementCreditAllowed(tripCreditTotal > 0 ? String(tripCreditTotal) : '0');
+    setSettlementBoxesDelivered(tripBoxesTotal > 0 ? String(tripBoxesTotal) : '0');
     setSettlementBoxesReturned('0');
     setSettlementReturnAmount('0');
 
@@ -916,6 +931,10 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
         orderNumber: ord.orderNumber,
         partyName: ord.partyName,
         totalBill: ord.totalBill,
+        cashAmount: isCash ? ord.totalBill : 0,
+        chequeAmount: 0,
+        upiAmount: 0,
+        rtnAmount: 0,
         deliveryStatus: ord.deliveryStatus || 'Delivered',
         paymentMode: ord.billType || (isCash ? 'CASH' : 'CREDIT'),
         paidAmount: isCash ? ord.totalBill : 0,
@@ -1004,11 +1023,20 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
 
   // Helper to get active trip orders for current selected load & vehicle
   const getActiveTripOrders = (loadNo = selectedTripLoadNo, veh = selectedTripVehicle) => {
-    return orders.filter(o => {
-      const matchLoad = loadNo === 'ALL' || (o.loadNumber || '189') === loadNo;
+    let matching = orders.filter(o => {
+      const matchLoad = loadNo === 'ALL' || String(o.loadNumber || '').trim() === String(loadNo).trim();
       const matchVeh = veh === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === veh;
       return matchLoad && matchVeh;
     });
+    if (matching.length === 0 && importedEveningOrders.length > 0) {
+      matching = importedEveningOrders.filter(o => {
+        const matchLoad = loadNo === 'ALL' || String(o.loadNumber || '').trim() === String(loadNo).trim();
+        const matchVeh = veh === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === veh;
+        return matchLoad && matchVeh;
+      });
+      if (matching.length === 0) matching = importedEveningOrders;
+    }
+    return matching;
   };
 
   // Export Trip Dispatch & Loading Sheet to Excel (.xlsx)
@@ -2142,27 +2170,29 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
     const isExcel = /\.(xlsx|xls|xlsm|xlsb)$/i.test(file.name);
     const reader = new FileReader();
 
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         let workbook: XLSX.WorkBook;
+        let fileRawText = '';
         if (isExcel) {
           const buffer = evt.target?.result as ArrayBuffer;
           workbook = XLSX.read(buffer, { type: 'array' });
         } else {
-          const csvText = (evt.target?.result as string) || '';
-          workbook = XLSX.read(csvText, { type: 'string' });
+          fileRawText = (evt.target?.result as string) || '';
+          workbook = XLSX.read(fileRawText, { type: 'string' });
         }
 
-        const activeTripOrders = getActiveTripOrders();
         let updatedBillsState = { ...settlementBillsState };
-        let matchedBillsCount = 0;
         let parsedCash = 0;
         let parsedCredit = 0;
         let newCheques: any[] = [];
         let newUpis: any[] = [];
         let newReturns: any[] = [];
-        let detectedBoxesDelivered = 0;
-        let detectedBoxesReturned = 0;
+        let newlyCreatedOrders: Order[] = [];
+        let detectedLoadNo = '';
+        let detectedVanNo = '';
+        let detectedDate = '';
+        let totalDispatchedFromFile = 0;
 
         for (const sheetName of workbook.SheetNames) {
           const worksheet = workbook.Sheets[sheetName];
@@ -2170,30 +2200,49 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
 
           if (!jsonRows || jsonRows.length === 0) continue;
 
-          // Detect if this sheet has bill-wise columns
+          // 1. Extract metadata from top rows (Load No, Van No, Load Date)
+          for (let r = 0; r < Math.min(10, jsonRows.length); r++) {
+            const rowStr = (jsonRows[r] || []).join(' ');
+            if (!detectedLoadNo) {
+              const mLoad = rowStr.match(/Load\s*(?:No|#)?\s*[:.\s-]*([0-9A-Za-z-]+)/i);
+              if (mLoad && mLoad[1]) detectedLoadNo = mLoad[1].replace(/,/g, '').trim();
+            }
+            if (!detectedVanNo) {
+              const mVan = rowStr.match(/Van\s*(?:No|#)?\s*[:.\s-]*([0-9A-Za-z-]+)/i);
+              if (mVan && mVan[1]) detectedVanNo = mVan[1].replace(/,/g, '').trim();
+            }
+            if (!detectedDate) {
+              const mDate = rowStr.match(/Load\s*Date\s*[:.\s-]*([0-9/-]+)/i) || rowStr.match(/Date\s*[:.\s-]*([0-9/-]+)/i);
+              if (mDate && mDate[1]) detectedDate = mDate[1].replace(/,/g, '').trim();
+            }
+          }
+
+          // 2. Identify header row
           let headerRowIndex = -1;
           let colMap: Record<string, number> = {};
 
-          for (let r = 0; r < Math.min(15, jsonRows.length); r++) {
+          for (let r = 0; r < Math.min(20, jsonRows.length); r++) {
             const row = jsonRows[r];
             if (!Array.isArray(row)) continue;
             const strRow = row.map(c => String(c).trim().toLowerCase());
 
             const hasBill = strRow.some(c => c.includes('bill') || c.includes('order') || c.includes('inv'));
-            const hasPartyOrAmt = strRow.some(c => c.includes('party') || c.includes('customer') || c.includes('amount') || c.includes('cash') || c.includes('total') || c.includes('रोकड़'));
-            if (hasBill && hasPartyOrAmt) {
+            const hasAmtOrParty = strRow.some(c => c.includes('amount') || c.includes('party') || c.includes('customer') || c.includes('cash') || c.includes('cheque') || c.includes('upi'));
+            
+            if (hasBill && hasAmtOrParty) {
               headerRowIndex = r;
               strRow.forEach((c, idx) => {
-                if (c.includes('bill no') || c === 'bill' || c.includes('order no') || c === '#') colMap.billNo = idx;
-                else if (c.includes('party') || c.includes('customer') || c.includes('client')) colMap.party = idx;
-                else if (c.includes('amount') || c.includes('total bill') || c === 'amt') colMap.amount = idx;
-                else if (c.includes('cash') || c.includes('रोकड़')) colMap.cash = idx;
-                else if (c.includes('cheque') || c.includes('check') || c.includes('चेक')) colMap.cheque = idx;
-                else if (c.includes('credit') || c.includes('उधारी')) colMap.credit = idx;
-                else if (c.includes('upi') || c.includes('qr') || c.includes('digital')) colMap.upi = idx;
+                if (c.includes('bill date') || c === 'date' || c.includes('दिनांक')) colMap.billDate = idx;
+                else if (c.includes('bill no') || c === 'bill' || c.includes('order no') || c === 'inv' || c === '#') colMap.billNo = idx;
+                else if (c.includes('party') || c.includes('customer') || c.includes('client') || c.includes('दुकान') || c.includes('party name')) colMap.party = idx;
+                else if (c.includes('amount') || c === 'amt' || c.includes('total bill') || c.includes('रकम') || c.includes('value')) colMap.amount = idx;
+                else if (c === 'cash' || c.includes('रोकड़') || c.includes('नकद')) colMap.cash = idx;
+                else if (c.includes('cheque') || c.includes('check') || c.includes('चेक') || c === 'chq') colMap.cheque = idx;
+                else if (c.includes('upi') || c.includes('qr') || c.includes('digital') || c.includes('online')) colMap.upi = idx;
+                else if (c === 'rtn' || c.includes('return') || c.includes('वापसी') || c === 'ret') colMap.return = idx;
+                else if (c.includes('credit') || c.includes('उधारी') || c === 'cr') colMap.credit = idx;
+                else if (c.includes('remark') || c.includes('reason') || c.includes('note') || c.includes('टिप्पणी') || c.includes('narration')) colMap.remark = idx;
                 else if (c.includes('status') || c.includes('delivery')) colMap.status = idx;
-                else if (c.includes('return') || c.includes('वापसी')) colMap.return = idx;
-                else if (c.includes('reason') || c.includes('remark') || c.includes('note')) colMap.reason = idx;
               });
               break;
             }
@@ -2205,157 +2254,235 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
               const row = jsonRows[r];
               if (!row || row.length === 0) continue;
 
-              const billRaw = colMap.billNo !== undefined ? String(row[colMap.billNo] || '').trim() : '';
-              const cleanBillNo = billRaw.replace(/\D/g, '');
-              const partyRaw = colMap.party !== undefined ? String(row[colMap.party] || '').trim().toLowerCase() : '';
-
-              if (!cleanBillNo && !partyRaw) continue;
-
               const firstCell = String(row[0] || '').toLowerCase();
-              if (firstCell.includes('total') || firstCell.includes('summary')) continue;
+              const secondCell = String(row[1] || '').toLowerCase();
+              const thirdCell = String(row[2] || '').toLowerCase();
 
-              const matchedOrd = activeTripOrders.find(o => {
-                const oNum = o.orderNumber.replace(/\D/g, '');
-                if (cleanBillNo && oNum && (oNum === cleanBillNo || o.orderNumber.toLowerCase() === billRaw.toLowerCase())) return true;
-                if (partyRaw && o.partyName.toLowerCase().includes(partyRaw.slice(0, 15))) return true;
-                return false;
-              });
-
-              const billKey = matchedOrd ? matchedOrd.orderNumber : (billRaw || `BILL-${r}`);
-              const totalBillAmt = matchedOrd ? matchedOrd.totalBill : (colMap.amount !== undefined ? parseFloat(String(row[colMap.amount]).replace(/[^0-9.]/g, '')) || 0 : 0);
-
-              let rowCash = colMap.cash !== undefined ? parseFloat(String(row[colMap.cash]).replace(/[^0-9.]/g, '')) : NaN;
-              let rowCredit = colMap.credit !== undefined ? parseFloat(String(row[colMap.credit]).replace(/[^0-9.]/g, '')) : NaN;
-              let rowUpi = colMap.upi !== undefined ? parseFloat(String(row[colMap.upi]).replace(/[^0-9.]/g, '')) : NaN;
-              let rowChequeAmt = colMap.cheque !== undefined ? parseFloat(String(row[colMap.cheque]).replace(/[^0-9.]/g, '')) : NaN;
-              let rowChequeInfo = colMap.cheque !== undefined ? String(row[colMap.cheque] || '').trim() : '';
-
-              if (colMap.cash !== undefined && String(row[colMap.cash]).trim().toUpperCase() === 'C') {
-                rowCash = totalBillAmt;
+              // Check for TOTALS row
+              if (firstCell.includes('total') || secondCell.includes('total') || thirdCell.includes('total')) {
+                continue;
               }
 
-              let statusVal = 'Delivered';
-              if (colMap.status !== undefined) {
-                const sRaw = String(row[colMap.status] || '').toLowerCase();
-                if (sRaw.includes('ret') || sRaw.includes('वापस')) statusVal = 'Returned';
-                else if (sRaw.includes('part') || sRaw.includes('आंशिक')) statusVal = 'Partial';
-                else if (sRaw.includes('canc') || sRaw.includes('रद्द')) statusVal = 'Cancelled';
-              }
+              const billRaw = colMap.billNo !== undefined ? String(row[colMap.billNo] || '').trim() : '';
+              const partyRaw = colMap.party !== undefined ? String(row[colMap.party] || '').trim() : '';
+              if (!billRaw && !partyRaw) continue;
 
-              let payMode = 'CASH';
-              if (!isNaN(rowCredit) && rowCredit > 0 && (isNaN(rowCash) || rowCash === 0)) payMode = 'CREDIT';
-              else if (!isNaN(rowChequeAmt) && rowChequeAmt > 0) payMode = 'CHEQUE';
-              else if (!isNaN(rowUpi) && rowUpi > 0) payMode = 'UPI';
+              // Extract Party Name and Party Code from "NAGESHWAR MEDICAL AND STORES (1267443)"
+              const partyCode = partyRaw.match(/\((.*?)\)/)?.[1]?.trim() || '';
+              const cleanPartyName = partyRaw.replace(/\(.*?\)/, '').trim() || partyRaw || `Party-${r}`;
 
-              let paidAmt = !isNaN(rowCash) && rowCash > 0 ? rowCash : (payMode === 'CASH' && statusVal === 'Delivered' ? totalBillAmt : 0);
-              if (!isNaN(rowCash) && rowCash > 0) parsedCash += rowCash;
-              else if (payMode === 'CASH' && statusVal === 'Delivered') parsedCash += totalBillAmt;
+              const amtRaw = colMap.amount !== undefined ? String(row[colMap.amount] || '').trim() : '';
+              const totalBillAmt = parseFloat(amtRaw.replace(/[^0-9.]/g, '')) || 0;
+              if (totalBillAmt <= 0 && !partyRaw) continue;
 
-              if (!isNaN(rowCredit) && rowCredit > 0) parsedCredit += rowCredit;
-              else if (payMode === 'CREDIT') parsedCredit += totalBillAmt;
+              const billDateRaw = colMap.billDate !== undefined ? String(row[colMap.billDate] || '').trim() : '';
+              const cashStr = colMap.cash !== undefined ? String(row[colMap.cash] || '').trim() : '';
+              const chqStr = colMap.cheque !== undefined ? String(row[colMap.cheque] || '').trim() : '';
+              const upiStr = colMap.upi !== undefined ? String(row[colMap.upi] || '').trim() : '';
+              const rtnStr = colMap.return !== undefined ? String(row[colMap.return] || '').trim() : '';
+              const remStr = colMap.remark !== undefined ? String(row[colMap.remark] || '').trim() : '';
 
-              if (rowChequeInfo && (rowChequeInfo.length > 2 || (!isNaN(rowChequeAmt) && rowChequeAmt > 0))) {
-                newCheques.push({
-                  id: `chq-${Date.now()}-${r}`,
-                  chequeNo: rowChequeInfo.match(/\d{5,8}/)?.[0] || rowChequeInfo,
-                  bankName: rowChequeInfo.includes('HDFC') ? 'HDFC' : rowChequeInfo.includes('SBI') ? 'SBI' : 'Bank',
-                  partyName: matchedOrd?.partyName || partyRaw || 'Retail Party',
-                  amount: !isNaN(rowChequeAmt) && rowChequeAmt > 0 ? rowChequeAmt : totalBillAmt
-                });
-              }
+              // Special keywords in CASH or REMARK columns:
+              // CANCEL or CREDIT NOTE -> Full Return / Credit Note
+              const isCancel = cashStr.toUpperCase().includes('CANCEL') || remStr.toUpperCase().includes('CREDIT NOTE') || remStr.toUpperCase().includes('CANCEL');
+              // SIGN BILL -> Credit (Udhaari)
+              const isSignBill = cashStr.toUpperCase().includes('SIGN BILL') || remStr.toUpperCase().includes('SIGN BILL');
 
-              if (!isNaN(rowUpi) && rowUpi > 0) {
-                newUpis.push({
-                  id: `upi-${Date.now()}-${r}`,
-                  upiRef: `UPI-${cleanBillNo || r}`,
-                  partyName: matchedOrd?.partyName || partyRaw || 'Retail Party',
-                  amount: rowUpi
-                });
-              }
+              const rowCash = (!isCancel && !isSignBill && cashStr) ? (parseFloat(cashStr.replace(/[^0-9.]/g, '')) || 0) : 0;
+              const rowCheque = chqStr ? (parseFloat(chqStr.replace(/[^0-9.]/g, '')) || 0) : 0;
+              const rowUpi = upiStr ? (parseFloat(upiStr.replace(/[^0-9.]/g, '')) || 0) : 0;
+              const rowRtn = rtnStr ? (parseFloat(rtnStr.replace(/[^0-9.]/g, '')) || 0) : 0;
 
-              if (statusVal === 'Returned' || (colMap.return !== undefined && String(row[colMap.return]).trim().length > 0)) {
-                const retAmt = colMap.return !== undefined ? parseFloat(String(row[colMap.return]).replace(/[^0-9.]/g, '')) || totalBillAmt : totalBillAmt;
-                const retReason = colMap.reason !== undefined ? String(row[colMap.reason] || 'Party Shop Closed') : 'Party Shop Closed';
+              let deliveryStatus = 'Delivered';
+              let paymentMode = 'CASH';
+              let paidAmt = 0;
+
+              if (isCancel) {
+                deliveryStatus = 'Cancelled';
+                paymentMode = 'CREDIT';
+                paidAmt = 0;
                 newReturns.push({
                   id: `ret-${Date.now()}-${r}`,
-                  partyName: matchedOrd?.partyName || partyRaw || 'Retail Party',
+                  partyName: cleanPartyName,
                   cartons: 1,
-                  amount: retAmt,
-                  reason: retReason
+                  amount: totalBillAmt,
+                  reason: 'Credit Note / Cancelled Bill'
                 });
-              }
+              } else if (isSignBill) {
+                deliveryStatus = 'Delivered';
+                paymentMode = 'CREDIT';
+                paidAmt = 0;
+                parsedCredit += totalBillAmt;
+              } else {
+                if (rowRtn > 0) deliveryStatus = 'Partial';
+                else deliveryStatus = 'Delivered';
 
-              updatedBillsState[billKey] = {
-                orderId: matchedOrd?.id || billKey,
-                orderNumber: billKey,
-                partyName: matchedOrd?.partyName || partyRaw,
-                totalBill: totalBillAmt,
-                deliveryStatus: statusVal,
-                paymentMode: payMode,
-                paidAmount: paidAmt,
-                pendingAmount: Math.max(0, totalBillAmt - paidAmt),
-                notes: 'Imported from Evening Sheet'
-              };
-              matchedBillsCount++;
-            }
-          } else {
-            // Check for summary rows (e.g. from exported Reconciliation Summary)
-            for (let r = 0; r < jsonRows.length; r++) {
-              const row = jsonRows[r];
-              if (!row || row.length === 0) continue;
-              const rowText = row.map(c => String(c).toLowerCase()).join(' ');
+                if (rowCheque > 0) paymentMode = 'CHEQUE';
+                else if (rowUpi > 0) paymentMode = 'UPI';
+                else paymentMode = 'CASH';
 
-              if (rowText.includes('cash collected') || rowText.includes('रोकड़')) {
-                const lastNum = row.slice(1).map(c => parseFloat(String(c).replace(/[^0-9.]/g, ''))).filter(n => !isNaN(n) && n > 0).pop();
-                if (lastNum) parsedCash = lastNum;
-              }
-              if (rowText.includes('credit allowed') || rowText.includes('उधारी')) {
-                const lastNum = row.slice(1).map(c => parseFloat(String(c).replace(/[^0-9.]/g, ''))).filter(n => !isNaN(n) && n > 0).pop();
-                if (lastNum) parsedCredit = lastNum;
-              }
-              if (rowText.includes('boxes delivered') || rowText.includes('वितरित बॉक्स')) {
-                const lastNum = row.slice(1).map(c => parseInt(String(c).replace(/\D/g, ''))).filter(n => !isNaN(n) && n > 0).pop();
-                if (lastNum) detectedBoxesDelivered = lastNum;
-              }
-              if (rowText.includes('boxes returned') || rowText.includes('वापस बॉक्स')) {
-                const lastNum = row.slice(1).map(c => parseInt(String(c).replace(/\D/g, ''))).filter(n => !isNaN(n) && n > 0).pop();
-                if (lastNum) detectedBoxesReturned = lastNum;
-              }
+                paidAmt = rowCash + rowCheque + rowUpi;
 
-              if (rowText.includes('cheque') && (rowText.includes('hdfc') || rowText.includes('sbi') || row.length >= 4)) {
-                const amt = row.map(c => parseFloat(String(c).replace(/[^0-9.]/g, ''))).filter(n => !isNaN(n) && n > 0).pop();
-                if (amt) {
+                if (rowCash > 0) parsedCash += rowCash;
+                if (rowCheque > 0) {
                   newCheques.push({
                     id: `chq-${Date.now()}-${r}`,
-                    chequeNo: String(row[1] || `CHQ-${r}`),
-                    bankName: String(row[2] || 'HDFC Bank'),
-                    partyName: String(row[3] || 'Retail Party'),
-                    amount: amt
+                    chequeNo: billRaw.replace(/\D/g, '') || `CHQ-${r}`,
+                    bankName: 'Cheque',
+                    partyName: cleanPartyName,
+                    amount: rowCheque
+                  });
+                }
+                if (rowUpi > 0) {
+                  newUpis.push({
+                    id: `upi-${Date.now()}-${r}`,
+                    upiRef: `UPI-${billRaw.replace(/\D/g, '') || r}`,
+                    partyName: cleanPartyName,
+                    amount: rowUpi
+                  });
+                }
+                if (rowRtn > 0) {
+                  newReturns.push({
+                    id: `ret-${Date.now()}-${r}`,
+                    partyName: cleanPartyName,
+                    cartons: 1,
+                    amount: rowRtn,
+                    reason: remStr || 'Partial Return / Return Goods'
                   });
                 }
               }
+
+              totalDispatchedFromFile += totalBillAmt;
+              const billKey = billRaw || `BILL-${r}`;
+
+              updatedBillsState[billKey] = {
+                orderId: billKey,
+                orderNumber: billKey,
+                partyName: cleanPartyName,
+                partyCode,
+                totalBill: totalBillAmt,
+                cashAmount: rowCash,
+                chequeAmount: rowCheque,
+                upiAmount: rowUpi,
+                rtnAmount: rowRtn,
+                deliveryStatus,
+                paymentMode,
+                paidAmount: paidAmt,
+                pendingAmount: isSignBill ? totalBillAmt : Math.max(0, totalBillAmt - paidAmt - rowRtn),
+                notes: remStr || (isCancel ? 'CANCEL' : isSignBill ? 'SIGN BILL' : '')
+              };
+
+              // Prepare created order object
+              const orderCartons = Math.max(1, Math.round(totalBillAmt / 2500));
+              newlyCreatedOrders.push({
+                id: `ord-eve-${Date.now()}-${r}`,
+                orderNumber: billKey,
+                invoiceNumber: `INV-${billKey.replace(/\D/g, '') || r}`,
+                partyId: partyCode || `pty-eve-${r}`,
+                partyName: cleanPartyName,
+                partyAddress: 'Market, Mumbai',
+                partyArea: 'Mumbai',
+                partyMobile: '9820000000',
+                partyGst: '27AABCC1234F1Z5',
+                partyLat: 19.1136,
+                partyLng: 72.8697,
+                items: [
+                  {
+                    productId: 'cad-1',
+                    productCode: 'CAD-DM-01',
+                    productName: 'Cadbury Assorted',
+                    category: CadburyProductCategory.DAIRY_MILK,
+                    cartons: orderCartons,
+                    units: orderCartons * 240,
+                    ratePerCarton: Math.round(totalBillAmt / orderCartons),
+                    discountPercent: 0,
+                    gstPercent: 18,
+                    totalAmount: totalBillAmt
+                  }
+                ],
+                totalCartons: orderCartons,
+                subtotal: Math.round(totalBillAmt / 1.18),
+                discountAmount: 0,
+                gstAmount: Math.round(totalBillAmt - (totalBillAmt / 1.18)),
+                totalBill: totalBillAmt,
+                orderDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
+                deliveryDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
+                stage: GoodsStage.DELIVERED,
+                loadingStatus: 'Loaded',
+                cartonsLoaded: orderCartons,
+                deliveryStatus: deliveryStatus as any,
+                deliverySequence: r,
+                paymentStatus: isSignBill ? 'Pending' : (rowRtn > 0 ? 'Partial' : 'Paid'),
+                paidAmount,
+                pendingAmount: isSignBill ? totalBillAmt : Math.max(0, totalBillAmt - paidAmt - rowRtn),
+                vehicleNumber: detectedVanNo || tripEditVan || 'V1',
+                driverName: tripEditDriver || 'Santosh Yadav',
+                loaderName: tripEditLoader || 'Loader Ramesh',
+                cashierName: tripEditCashier || 'Cashier Suresh',
+                billType: isSignBill ? 'CREDIT' : 'CASH',
+                loadNumber: detectedLoadNo || selectedTripLoadNo || '193',
+                deliveryRemarks: remStr || ''
+              });
             }
           }
         }
 
+        // Apply all parsed settlement state
         setSettlementBillsState(updatedBillsState);
-        if (parsedCash > 0) {
-          setSettlementActualCash(String(parsedCash));
-          handleAutoBreakdownDenominations(parsedCash);
-        }
-        if (parsedCredit > 0) setSettlementCreditAllowed(String(parsedCredit));
-        if (newCheques.length > 0) setChequesList(newCheques);
-        if (newUpis.length > 0) setUpisList(newUpis);
-        if (newReturns.length > 0) setReturnsList(newReturns);
-        if (detectedBoxesDelivered > 0) setSettlementBoxesDelivered(String(detectedBoxesDelivered));
-        if (detectedBoxesReturned > 0) setSettlementBoxesReturned(String(detectedBoxesReturned));
+        setSettlementActualCash(String(parsedCash));
+        handleAutoBreakdownDenominations(parsedCash);
+        setSettlementCreditAllowed(String(parsedCredit));
+        setChequesList(newCheques);
+        setUpisList(newUpis);
+        setReturnsList(newReturns);
 
-        const msg = `✅ Excel फ़ाइल "${file.name}" सफलतापूर्वक इम्पोर्ट हुई!\n` +
-          `• कुल अपडेटेड बिल: ${matchedBillsCount || activeTripOrders.length}\n` +
-          `• कुल रोकड़ (Cash): ₹${(parsedCash || Number(settlementActualCash) || 0).toLocaleString('en-IN')}\n` +
-          `• कुल उधारी (Credit): ₹${(parsedCredit || Number(settlementCreditAllowed) || 0).toLocaleString('en-IN')}\n` +
-          `• चेक (Cheques): ${newCheques.length} | UPI: ${newUpis.length} | रिटर्न: ${newReturns.length}\n` +
-          `सारा हिसाब व कैलकुलेशन ऑटोमैटिक अपडेट हो गया है!`;
+        if (detectedLoadNo) setSelectedTripLoadNo(detectedLoadNo);
+        if (detectedVanNo) setTripEditVan(detectedVanNo);
+
+        const totalBoxes = newlyCreatedOrders.reduce((s, o) => s + (o.totalCartons || 1), 0);
+        const retBoxes = newReturns.length;
+        setTripEditBoxesLoaded(String(totalBoxes || 54));
+        setSettlementBoxesDelivered(String(Math.max(0, totalBoxes - retBoxes)));
+        setSettlementBoxesReturned(String(retBoxes));
+
+        if (newlyCreatedOrders.length > 0) {
+          setImportedEveningOrders(newlyCreatedOrders);
+          // Persist to server backend
+          try {
+            if (onImportOrders) {
+              await onImportOrders(newlyCreatedOrders);
+            } else {
+              await fetch('/api/cadbury/orders/bulk-import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orders: newlyCreatedOrders })
+              });
+            }
+          } catch (apiErr) {
+            console.warn('Server sync error on bulk orders import:', apiErr);
+          }
+        }
+
+        const totalReturnsAmt = newReturns.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+        const totalAccountedAmt = parsedCash + newCheques.reduce((s, c) => s + c.amount, 0) + newUpis.reduce((s, u) => s + u.amount, 0) + parsedCredit + totalReturnsAmt;
+        const diffAmt = totalAccountedAmt - totalDispatchedFromFile;
+
+        const msg = `✅ Excel फ़ाइल "${file.name}" सफलतापूर्वक इम्पोर्ट व कैलकुलेट हो गई!\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `• लोड नंबर (Load No): #${detectedLoadNo || '193'} | वैन: ${detectedVanNo || 'V1'}\n` +
+          `• कुल बिल (Total Bills): ${newlyCreatedOrders.length} बिल\n` +
+          `• कुल डिस्पैच रकम: ₹${totalDispatchedFromFile.toLocaleString('en-IN')}\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `1. रोकड़ (CASH): ₹${parsedCash.toLocaleString('en-IN')}\n` +
+          `2. चेक (CHEQUE): ₹${newCheques.reduce((s, c) => s + c.amount, 0).toLocaleString('en-IN')} (${newCheques.length} चेक)\n` +
+          `3. डिजिटल (UPI): ₹${newUpis.reduce((s, u) => s + u.amount, 0).toLocaleString('en-IN')} (${newUpis.length} UPIs)\n` +
+          `4. उधारी (SIGN BILL): ₹${parsedCredit.toLocaleString('en-IN')}\n` +
+          `5. वापसी (RTN + Cancelled): ₹${totalReturnsAmt.toLocaleString('en-IN')} (${newReturns.length} आइटम्स)\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `कुल हिसाब: ₹${totalAccountedAmt.toLocaleString('en-IN')} ` +
+          (Math.abs(diffAmt) < 1 ? `(✅ हिसाब 100% बराबर)` : diffAmt > 0 ? `(+₹${diffAmt.toLocaleString('en-IN')} Excess Cash)` : `(-₹${Math.abs(diffAmt).toLocaleString('en-IN')} Shortage)`) + `\n` +
+          `✉️ कैश लिफाफा रसीद (Envelope Slip) पर नोटों का ब्रेकडाउन भी अपने-आप भर गया है!`;
+
         setSettlementSavedSuccess(msg);
         alert(msg);
       } catch (err: any) {
@@ -5484,11 +5611,22 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
           <div className="bg-slate-50 w-full max-w-5xl rounded-2xl shadow-2xl p-4 sm:p-6 space-y-5 max-h-[95vh] overflow-y-auto border border-slate-200">
             {/* Header */}
             {(() => {
-              const tripOrders = orders.filter(o => {
-                const matchLoad = selectedTripLoadNo === 'ALL' || (o.loadNumber || '188') === selectedTripLoadNo;
-                const matchVeh = selectedTripVehicle === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === selectedTripVehicle;
-                return matchLoad && matchVeh;
-              });
+              const tripOrders = (() => {
+                let matched = orders.filter(o => {
+                  const matchLoad = selectedTripLoadNo === 'ALL' || String(o.loadNumber || '').trim() === String(selectedTripLoadNo).trim();
+                  const matchVeh = selectedTripVehicle === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === selectedTripVehicle;
+                  return matchLoad && matchVeh;
+                });
+                if (matched.length === 0 && importedEveningOrders.length > 0) {
+                  matched = importedEveningOrders.filter(o => {
+                    const matchLoad = selectedTripLoadNo === 'ALL' || String(o.loadNumber || '').trim() === String(selectedTripLoadNo).trim();
+                    const matchVeh = selectedTripVehicle === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === selectedTripVehicle;
+                    return matchLoad && matchVeh;
+                  });
+                  if (matched.length === 0) matched = importedEveningOrders;
+                }
+                return matched;
+              })();
 
               const totalTripBill = tripOrders.reduce((s, o) => s + (o.totalBill || 0), 0);
               const totalTripCartons = tripOrders.reduce((s, o) => s + (o.totalCartons || 0), 0);
@@ -6161,17 +6299,21 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                           </div>
                         </div>
 
-                        <div className="overflow-x-auto max-h-72">
+                        <div className="overflow-x-auto max-h-96">
                           <table className="w-full text-xs text-left border-collapse border border-slate-200">
                             <thead className="bg-slate-100 text-[10px] uppercase font-bold text-slate-700 sticky top-0 z-10">
                               <tr>
                                 <th className="p-1.5 border border-slate-200 text-center w-8">#</th>
                                 <th className="p-1.5 border border-slate-200 w-16 text-center">Bill No</th>
                                 <th className="p-1.5 border border-slate-200">Party Name</th>
-                                <th className="p-1.5 border border-slate-200 text-right w-20">Amount</th>
-                                <th className="p-1.5 border border-slate-200 text-center w-28">Delivery Status</th>
-                                <th className="p-1.5 border border-slate-200 text-center w-24">Payment Mode</th>
-                                <th className="p-1.5 border border-slate-200 text-right w-24">Paid Amount</th>
+                                <th className="p-1.5 border border-slate-200 text-right w-20">AMOUNT (₹)</th>
+                                <th className="p-1.5 border border-slate-200 text-right w-20 bg-emerald-50 text-emerald-900">CASH (₹)</th>
+                                <th className="p-1.5 border border-slate-200 text-right w-20 bg-blue-50 text-blue-900">CHEQUE (₹)</th>
+                                <th className="p-1.5 border border-slate-200 text-right w-20 bg-teal-50 text-teal-900">UPI (₹)</th>
+                                <th className="p-1.5 border border-slate-200 text-right w-20 bg-rose-50 text-rose-900">RTN (₹)</th>
+                                <th className="p-1.5 border border-slate-200 text-center w-28">STATUS</th>
+                                <th className="p-1.5 border border-slate-200 text-center w-20">MODE</th>
+                                <th className="p-1.5 border border-slate-200 text-left w-24">REMARK</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -6179,17 +6321,38 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                                 const bState = settlementBillsState[ord.orderNumber] || {
                                   deliveryStatus: ord.deliveryStatus || 'Delivered',
                                   paymentMode: ord.billType || 'CASH',
-                                  paidAmount: ord.billType === 'CREDIT' ? 0 : ord.totalBill
+                                  paidAmount: ord.billType === 'CREDIT' ? 0 : ord.totalBill,
+                                  cashAmount: ord.billType === 'CREDIT' ? 0 : ord.totalBill,
+                                  chequeAmount: 0,
+                                  upiAmount: 0,
+                                  rtnAmount: 0,
+                                  notes: ''
                                 };
                                 return (
                                   <tr key={ord.id || ord.orderNumber} className="hover:bg-slate-50">
                                     <td className="p-1.5 border border-slate-200 text-center font-mono text-[10px] text-slate-500">{idx + 1}</td>
                                     <td className="p-1.5 border border-slate-200 text-center font-mono font-bold text-slate-900">
-                                      /{ord.orderNumber.replace(/\D/g, '')}
+                                      {ord.orderNumber.startsWith('/') ? ord.orderNumber : `/${ord.orderNumber.replace(/\D/g, '') || ord.orderNumber}`}
                                     </td>
-                                    <td className="p-1.5 border border-slate-200 font-medium text-slate-800 truncate max-w-xs">{ord.partyName}</td>
+                                    <td className="p-1.5 border border-slate-200 font-medium text-slate-800 truncate max-w-xs" title={ord.partyName}>
+                                      {ord.partyName}
+                                    </td>
                                     <td className="p-1.5 border border-slate-200 text-right font-mono font-bold">
-                                      ₹{(ord.totalBill ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                      ₹{(ord.totalBill ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 0 })}
+                                    </td>
+                                    <td className="p-1.5 border border-slate-200 text-right font-mono font-bold text-emerald-700 bg-emerald-50/20">
+                                      {bState.cashAmount !== undefined && bState.cashAmount > 0 
+                                        ? `₹${Number(bState.cashAmount).toLocaleString('en-IN')}` 
+                                        : (bState.notes === 'CANCEL' ? <span className="text-rose-600 font-bold text-[10px]">CANCEL</span> : bState.notes === 'SIGN BILL' ? <span className="text-amber-600 font-bold text-[10px]">SIGN BILL</span> : '-')}
+                                    </td>
+                                    <td className="p-1.5 border border-slate-200 text-right font-mono font-bold text-blue-700 bg-blue-50/20">
+                                      {bState.chequeAmount !== undefined && bState.chequeAmount > 0 ? `₹${Number(bState.chequeAmount).toLocaleString('en-IN')}` : '-'}
+                                    </td>
+                                    <td className="p-1.5 border border-slate-200 text-right font-mono font-bold text-teal-700 bg-teal-50/20">
+                                      {bState.upiAmount !== undefined && bState.upiAmount > 0 ? `₹${Number(bState.upiAmount).toLocaleString('en-IN')}` : '-'}
+                                    </td>
+                                    <td className="p-1.5 border border-slate-200 text-right font-mono font-bold text-rose-700 bg-rose-50/20">
+                                      {bState.rtnAmount !== undefined && bState.rtnAmount > 0 ? `₹${Number(bState.rtnAmount).toLocaleString('en-IN')}` : '-'}
                                     </td>
                                     <td className="p-1 border border-slate-200 text-center">
                                       <select
@@ -6206,13 +6369,15 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                                             ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                                             : bState.deliveryStatus === 'Returned'
                                             ? 'bg-rose-50 text-rose-800 border-rose-300'
+                                            : bState.deliveryStatus === 'Cancelled'
+                                            ? 'bg-rose-100 text-rose-900 border-rose-400'
                                             : 'bg-amber-50 text-amber-800 border-amber-300'
                                         }`}
                                       >
-                                        <option value="Delivered">Delivered (सफल)</option>
-                                        <option value="Returned">Returned (वापस)</option>
-                                        <option value="Partial">Partial (आंशिक)</option>
-                                        <option value="Cancelled">Cancelled (रद्द)</option>
+                                        <option value="Delivered">Delivered</option>
+                                        <option value="Returned">Returned</option>
+                                        <option value="Partial">Partial</option>
+                                        <option value="Cancelled">Cancelled</option>
                                       </select>
                                     </td>
                                     <td className="p-1 border border-slate-200 text-center">
@@ -6229,28 +6394,42 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                                       >
                                         <option value="CASH">CASH</option>
                                         <option value="CHEQUE">CHEQUE</option>
-                                        <option value="UPI">UPI / QR</option>
+                                        <option value="UPI">UPI</option>
                                         <option value="CREDIT">CREDIT</option>
                                       </select>
                                     </td>
-                                    <td className="p-1 border border-slate-200 text-right">
+                                    <td className="p-1 border border-slate-200 text-left">
                                       <input
-                                        type="number"
-                                        value={bState.paidAmount ?? ord.totalBill}
+                                        type="text"
+                                        value={bState.notes || ''}
+                                        placeholder="Remark..."
                                         onChange={(e) => {
-                                          const val = parseFloat(e.target.value) || 0;
+                                          const val = e.target.value;
                                           setSettlementBillsState((prev: any) => ({
                                             ...prev,
-                                            [ord.orderNumber]: { ...(prev[ord.orderNumber] || {}), paidAmount: val }
+                                            [ord.orderNumber]: { ...(prev[ord.orderNumber] || {}), notes: val }
                                           }));
                                         }}
-                                        className="w-full p-1 text-right font-mono font-bold text-[11px] border border-slate-300 rounded"
+                                        className="w-full p-1 text-[11px] font-mono border border-slate-300 rounded bg-white"
                                       />
                                     </td>
                                   </tr>
                                 );
                               })}
                             </tbody>
+                            <tfoot className="bg-slate-100 font-mono font-bold text-xs sticky bottom-0 border-t-2 border-slate-300">
+                              <tr>
+                                <td colSpan={3} className="p-2 text-right uppercase">कुल योग (TOTALS):</td>
+                                <td className="p-2 text-right font-black text-slate-900">₹{totalTripBill.toLocaleString('en-IN')}</td>
+                                <td className="p-2 text-right font-black text-emerald-800">₹{cashAmt.toLocaleString('en-IN')}</td>
+                                <td className="p-2 text-right font-black text-blue-800">₹{totalChequesAmount.toLocaleString('en-IN')}</td>
+                                <td className="p-2 text-right font-black text-teal-800">₹{totalUpiAmount.toLocaleString('en-IN')}</td>
+                                <td className="p-2 text-right font-black text-rose-800">₹{totalReturnsAmount.toLocaleString('en-IN')}</td>
+                                <td colSpan={3} className="p-2 text-center text-slate-700 font-sans text-[11px]">
+                                  उधारी (SIGN BILL): <strong>₹{creditAmt.toLocaleString('en-IN')}</strong> | अंतर: <strong className={Math.abs(difference) < 1 ? 'text-emerald-700' : 'text-rose-700'}>{difference >= 0 ? `+₹${difference}` : `-₹${Math.abs(difference)}`}</strong>
+                                </td>
+                              </tr>
+                            </tfoot>
                           </table>
                         </div>
                       </div>
