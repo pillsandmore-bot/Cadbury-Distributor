@@ -2414,7 +2414,7 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
                 deliveryStatus: deliveryStatus as any,
                 deliverySequence: r,
                 paymentStatus: isSignBill ? 'Pending' : (rowRtn > 0 ? 'Partial' : 'Paid'),
-                paidAmount,
+                paidAmount: paidAmt,
                 pendingAmount: isSignBill ? totalBillAmt : Math.max(0, totalBillAmt - paidAmt - rowRtn),
                 vehicleNumber: detectedVanNo || tripEditVan || 'V1',
                 driverName: tripEditDriver || 'Santosh Yadav',
