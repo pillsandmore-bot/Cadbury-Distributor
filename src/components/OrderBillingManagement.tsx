@@ -12,7 +12,8 @@ import {
   Order, 
   OrderItem, 
   Vehicle, 
-  CadburyProductCategory 
+  CadburyProductCategory,
+  GoodsStage
 } from '../types/cadbury';
 
 interface OrderBillingManagementProps {
@@ -2391,7 +2392,7 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
                     productId: 'cad-1',
                     productCode: 'CAD-DM-01',
                     productName: 'Cadbury Assorted',
-                    category: CadburyProductCategory.DAIRY_MILK,
+                    category: (CadburyProductCategory?.DAIRY_MILK || 'Cadbury Dairy Milk') as any,
                     cartons: orderCartons,
                     units: orderCartons * 240,
                     ratePerCarton: Math.round(totalBillAmt / orderCartons),
@@ -2407,7 +2408,7 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
                 totalBill: totalBillAmt,
                 orderDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
                 deliveryDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
-                stage: GoodsStage.DELIVERED,
+                stage: (GoodsStage?.DELIVERED || 'Delivered') as any,
                 loadingStatus: 'Loaded',
                 cartonsLoaded: orderCartons,
                 deliveryStatus: deliveryStatus as any,
