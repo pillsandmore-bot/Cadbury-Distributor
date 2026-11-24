@@ -66,6 +66,159 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
   const [tripCrewSavedMsg, setTripCrewSavedMsg] = useState<string>('');
   const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
 
+  // Master lists for Vans (V1 to V6 & custom), Drivers, Loaders (LDR), and Cashiers
+  const [crewMaster, setCrewMaster] = useState<{
+    vans: Array<{ id: string; name: string; type?: string }>;
+    drivers: Array<{ id: string; name: string; beat?: string }>;
+    loaders: Array<{ id: string; name: string; bay?: string }>;
+    cashiers: Array<{ id: string; name: string; location?: string }>;
+  }>(() => {
+    try {
+      const saved = localStorage.getItem('cadbury_crew_master');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      vans: [
+        { id: 'v1', name: 'V1', type: 'Tata Ace (Van 1)' },
+        { id: 'v2', name: 'V2', type: 'Mahindra Bolero (Van 2)' },
+        { id: 'v3', name: 'V3', type: 'Tata 407 (Van 3)' },
+        { id: 'v4', name: 'V4', type: 'Van 4' },
+        { id: 'v5', name: 'V5', type: 'Van 5' },
+        { id: 'v6', name: 'V6', type: 'Van 6' },
+        { id: 'v-mh02', name: 'MH 02 EK 4589', type: 'Tata Ace V2' },
+        { id: 'v-mh04', name: 'MH 04 AB 1234', type: 'Mahindra Bolero V1' },
+        { id: 'v-mh03', name: 'MH 03 CD 5678', type: 'Tata 407 V3' }
+      ],
+      drivers: [
+        { id: 'd1', name: 'Santosh Yadav', beat: 'Bhandup West Beat / Station Road' },
+        { id: 'd2', name: 'Krishna', beat: 'Bhandup Station Road / Village Road' },
+        { id: 'd3', name: 'Ramesh Kumar', beat: 'Mulund West Beat' },
+        { id: 'd4', name: 'Mukesh Sharma', beat: 'Kanjurmarg Beat' }
+      ],
+      loaders: [
+        { id: 'l1', name: 'subham (LDR)', bay: 'Central Warehouse Bay 1' },
+        { id: 'l2', name: 'Arjun (LDR)', bay: 'Central Warehouse Bay 2' },
+        { id: 'l3', name: 'Ramesh (LDR)', bay: 'Central Warehouse Bay 3' },
+        { id: 'l4', name: 'Ganesh (LDR)', bay: 'Loading Dock Bay 4' }
+      ],
+      cashiers: [
+        { id: 'c1', name: 'tejas (Cashier)', location: 'Village Road Collection Counter' },
+        { id: 'c2', name: 'Adarsh (Cashier)', location: 'Station Road Counter' },
+        { id: 'c3', name: 'Vikas (Cashier)', location: 'Main Cash Counter' },
+        { id: 'c4', name: 'Sunil (Cashier)', location: 'Market Collection Counter' }
+      ]
+    };
+  });
+
+  // Dedicated Crew & Fleet Master Manager Modal State
+  const [isCrewMasterModalOpen, setIsCrewMasterModalOpen] = useState<boolean>(false);
+  const [crewModalTab, setCrewModalTab] = useState<'vans' | 'drivers' | 'loaders' | 'cashiers'>('vans');
+  const [crewNewNameInput, setCrewNewNameInput] = useState<string>('');
+  const [crewNewExtraInput, setCrewNewExtraInput] = useState<string>('');
+  const [isEveningCrewEditorOpen, setIsEveningCrewEditorOpen] = useState<boolean>(false);
+
+  // Quick Add Modal / State for individual category
+  const [quickAddCat, setQuickAddCat] = useState<'vans' | 'drivers' | 'loaders' | 'cashiers' | null>(null);
+  const [quickAddName, setQuickAddName] = useState<string>('');
+  const [quickAddExtra, setQuickAddExtra] = useState<string>('');
+
+  // Fetch Crew Master from server backend on load
+  useEffect(() => {
+    fetch('/api/cadbury/crew-master')
+      .then(res => res.json())
+      .then(data => {
+        if (data && Array.isArray(data.vans) && Array.isArray(data.drivers)) {
+          setCrewMaster(data);
+          try {
+            localStorage.setItem('cadbury_crew_master', JSON.stringify(data));
+          } catch (e) {}
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Save / Add item to crewMaster
+  const handleSaveCrewMasterItem = async (
+    category: 'vans' | 'drivers' | 'loaders' | 'cashiers',
+    name: string,
+    extra: string
+  ) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const itemData: any = {
+      id: `crew-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      name: trimmed
+    };
+    if (category === 'vans') itemData.type = extra.trim() || 'Delivery Van';
+    if (category === 'drivers') itemData.beat = extra.trim() || 'Delivery Beat / Area';
+    if (category === 'loaders') itemData.bay = extra.trim() || 'Warehouse Loading Bay';
+    if (category === 'cashiers') itemData.location = extra.trim() || 'Cash Collection Counter';
+
+    setCrewMaster(prev => {
+      const next = { ...prev };
+      const list = next[category] || [];
+      const existsIdx = list.findIndex(x => x.name.toLowerCase() === trimmed.toLowerCase());
+      if (existsIdx >= 0) {
+        list[existsIdx] = { ...list[existsIdx], ...itemData };
+        next[category] = [...list];
+      } else {
+        next[category] = [...list, itemData];
+      }
+      try {
+        localStorage.setItem('cadbury_crew_master', JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+
+    // Automatically apply to active selection
+    if (category === 'vans') setTripEditVan(trimmed);
+    if (category === 'drivers') {
+      setTripEditDriver(trimmed);
+      if (extra.trim()) setTripEditDriverLocation(extra.trim());
+    }
+    if (category === 'loaders') {
+      setTripEditLoader(trimmed);
+      if (extra.trim()) setTripEditLoaderLocation(extra.trim());
+    }
+    if (category === 'cashiers') {
+      setTripEditCashier(trimmed);
+      if (extra.trim()) setTripEditCashierLocation(extra.trim());
+    }
+
+    try {
+      await fetch('/api/cadbury/crew-master', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category, item: itemData })
+      });
+    } catch (e) {}
+  };
+
+  // Delete item from crewMaster
+  const handleDeleteCrewMasterItem = async (
+    category: 'vans' | 'drivers' | 'loaders' | 'cashiers',
+    id: string,
+    name: string
+  ) => {
+    const confirm = window.confirm(`क्या आप "${name}" को मास्टर सूची से हटाना चाहते हैं?`);
+    if (!confirm) return;
+
+    setCrewMaster(prev => {
+      const next = { ...prev };
+      next[category] = (next[category] || []).filter(x => x.id !== id && x.name !== name);
+      try {
+        localStorage.setItem('cadbury_crew_master', JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+
+    try {
+      await fetch(`/api/cadbury/crew-master/${category}/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+    } catch (e) {}
+  };
+
   // Trip Loading Sheet Row-Level Evening Collection & RECD State
   const [isEveningEditMode, setIsEveningEditMode] = useState<boolean>(true);
   const [tripSheetEntries, setTripSheetEntries] = useState<{
@@ -1089,6 +1242,12 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
           type: 'Tata Ace Gold'
         }).catch(() => {});
       }
+
+      // Automatically register any new van, driver, loader, cashier into Crew Master
+      if (tripEditVan) handleSaveCrewMasterItem('vans', tripEditVan, 'Delivery Van');
+      if (tripEditDriver) handleSaveCrewMasterItem('drivers', tripEditDriver, tripEditDriverLocation);
+      if (tripEditLoader) handleSaveCrewMasterItem('loaders', tripEditLoader, tripEditLoaderLocation);
+      if (tripEditCashier) handleSaveCrewMasterItem('cashiers', tripEditCashier, tripEditCashierLocation);
 
       setTripCrewSavedMsg(`✅ Van "${tripEditVan}" par Driver "${tripEditDriver}", Loader "${tripEditLoader}", Cashier "${tripEditCashier}" aur ${tripEditBoxesLoaded || '54'} Boxes jud gaye! (${matching.length} बिल अपडेट)`);
       setTimeout(() => setTripCrewSavedMsg(''), 4500);
@@ -5272,14 +5431,25 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                 <div className="space-y-4">
                   {/* INTERACTIVE TRIP CREW ASSIGNMENT BAR (Screen only - no-print) */}
                   <div className="no-print p-4 bg-gradient-to-r from-amber-50 via-purple-50 to-indigo-50 border border-purple-200 rounded-2xl shadow-sm space-y-3">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-purple-100 pb-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-purple-200/60 pb-2">
                       <div>
-                        <h3 className="text-sm font-black text-cadbury-950 flex items-center gap-1.5">
-                          <i className="fa-solid fa-truck-ramp-box text-cadbury-700"></i>
-                          Trip Van & Crew Customization (गाड़ी व स्टाफ बदलाव)
-                        </h3>
-                        <p className="text-[11px] text-slate-600">
-                          Delivery Van, Driver, Loader (LDR) aur Cashier ke naam yahan se badle aur sabhi {tripOrders.length} bills par ek saath update karein:
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-black text-cadbury-950 flex items-center gap-1.5">
+                            <i className="fa-solid fa-truck-ramp-box text-cadbury-700"></i>
+                            वैन, ड्राइवर, लोडर व कैशियर चयन (Van, Driver, Loader & Cashier Assignment)
+                          </h3>
+                          <button
+                            type="button"
+                            onClick={() => setIsCrewMasterModalOpen(true)}
+                            className="px-2.5 py-1 bg-cadbury-900 hover:bg-cadbury-950 text-white text-[11px] font-bold rounded-lg shadow-sm flex items-center gap-1 transition-all active:scale-95"
+                            title="वैन, ड्राइवर, लोडर व कैशियर मास्टर सूची खोलें व नए नाम जोड़ें"
+                          >
+                            <i className="fa-solid fa-users-gear text-gold-400"></i>
+                            <span>👥 Manage Master List (मास्टर लिस्ट खोलें)</span>
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-600 mt-0.5">
+                          वैन (V1, V2, V3...), ड्राइवर, लोडर और कैशियर चुनें या नया जोड़ें — यह सभी {tripOrders.length} बिलों व प्रिंटआउट पर तुरंत लागू होगा:
                         </p>
                       </div>
                       {tripCrewSavedMsg && (
@@ -5290,105 +5460,270 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                      {/* Van Number */}
-                      <div>
-                        <label className="block text-[11px] font-black text-slate-700 mb-1 flex items-center gap-1">
-                          <i className="fa-solid fa-truck text-cadbury-700"></i> Delivery Van No.
-                        </label>
-                        <input
-                          type="text"
-                          list="trip-crew-van-list"
-                          value={tripEditVan}
-                          onChange={(e) => setTripEditVan(e.target.value.toUpperCase())}
-                          placeholder="e.g. MH 02 EK 4589"
-                          className="w-full px-3 py-1.5 border border-purple-300 rounded-xl font-mono font-bold text-xs bg-white text-slate-900 focus:ring-2 focus:ring-purple-500 uppercase shadow-sm"
-                        />
-                        <datalist id="trip-crew-van-list">
-                          {vehicles.map(v => (
-                            <option key={v.id} value={v.vehicleNumber}>{v.vehicleNumber} ({v.type || 'Van'})</option>
-                          ))}
-                          <option value="MH 02 EK 4589">MH 02 EK 4589 (Tata Ace V2)</option>
-                          <option value="MH 04 AB 1234">MH 04 AB 1234 (Mahindra Bolero V1)</option>
-                          <option value="MH 03 CD 5678">MH 03 CD 5678 (Tata 407 V3)</option>
-                        </datalist>
+                      {/* 1. Van Selection (V1 to V6 & Custom) */}
+                      <div className="bg-white p-2.5 rounded-xl border border-purple-200 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[11px] font-black text-slate-800 flex items-center gap-1">
+                              <i className="fa-solid fa-truck text-cadbury-700"></i> Delivery Van No.
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuickAddCat('vans');
+                                setQuickAddName('');
+                                setQuickAddExtra('');
+                              }}
+                              className="text-[10px] font-bold text-cadbury-700 hover:text-cadbury-900 underline flex items-center gap-0.5"
+                              title="नई वैन जोड़ें"
+                            >
+                              <i className="fa-solid fa-circle-plus"></i> + New Van
+                            </button>
+                          </div>
+
+                          {/* Quick Van Pills: V1 to V6 */}
+                          <div className="flex flex-wrap gap-1 mb-1.5">
+                            {crewMaster.vans.slice(0, 6).map(v => (
+                              <button
+                                key={v.id}
+                                type="button"
+                                onClick={() => setTripEditVan(v.name)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-black transition-all ${
+                                  tripEditVan.toUpperCase() === v.name.toUpperCase()
+                                    ? 'bg-cadbury-900 text-white shadow-sm ring-2 ring-cadbury-500 scale-105'
+                                    : 'bg-slate-100 hover:bg-purple-100 text-slate-800 border border-slate-200'
+                                }`}
+                              >
+                                {v.name}
+                              </button>
+                            ))}
+                          </div>
+
+                          <input
+                            type="text"
+                            list="trip-crew-van-list"
+                            value={tripEditVan}
+                            onChange={(e) => setTripEditVan(e.target.value.toUpperCase())}
+                            placeholder="e.g. V1, V2, MH 02..."
+                            className="w-full px-2.5 py-1 border border-purple-300 rounded-lg font-mono font-bold text-xs bg-white text-slate-900 focus:ring-2 focus:ring-purple-500 uppercase shadow-inner"
+                          />
+                          <datalist id="trip-crew-van-list">
+                            {crewMaster.vans.map(v => (
+                              <option key={v.id} value={v.name}>{v.name} ({v.type || 'Van'})</option>
+                            ))}
+                          </datalist>
+                        </div>
+                        <span className="text-[9px] text-slate-500 mt-1 block">चुनी हुई वैन: <strong className="font-mono text-cadbury-900">{tripEditVan}</strong></span>
                       </div>
 
-                      {/* Boxes Loaded (Custom Box Count) */}
-                      <div>
-                        <label className="block text-[11px] font-black text-indigo-900 mb-1 flex items-center gap-1">
-                          <i className="fa-solid fa-boxes-stacked text-indigo-600"></i> Boxes Loaded (लोड बॉक्स) *
-                        </label>
-                        <input
-                          type="number"
-                          value={tripEditBoxesLoaded}
-                          onChange={(e) => setTripEditBoxesLoaded(e.target.value)}
-                          placeholder="Total Boxes"
-                          className="w-full px-3 py-1.5 border border-indigo-300 rounded-xl font-mono font-black text-xs bg-white text-indigo-950 focus:ring-2 focus:ring-indigo-500 shadow-sm"
-                        />
-                        <span className="text-[10px] text-slate-500 mt-0.5 block">Auto: {totalTripCartons} Boxes</span>
+                      {/* 2. Boxes Loaded (Custom Box Count) */}
+                      <div className="bg-white p-2.5 rounded-xl border border-indigo-200 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[11px] font-black text-indigo-950 flex items-center gap-1">
+                              <i className="fa-solid fa-boxes-stacked text-indigo-600"></i> Boxes Loaded (लोड बॉक्स) *
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setTripEditBoxesLoaded(String(totalTripCartons || 54))}
+                              className="text-[10px] font-bold text-indigo-700 hover:underline"
+                            >
+                              Auto: {totalTripCartons}
+                            </button>
+                          </div>
+
+                          {/* Quick Box presets */}
+                          <div className="flex gap-1 mb-1.5">
+                            {['54', '108', '120'].map(b => (
+                              <button
+                                key={b}
+                                type="button"
+                                onClick={() => setTripEditBoxesLoaded(b)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-black transition-all ${
+                                  tripEditBoxesLoaded === b
+                                    ? 'bg-indigo-700 text-white shadow-sm'
+                                    : 'bg-slate-100 hover:bg-indigo-50 text-slate-700 border border-slate-200'
+                                }`}
+                              >
+                                {b} Bx
+                              </button>
+                            ))}
+                          </div>
+
+                          <input
+                            type="number"
+                            value={tripEditBoxesLoaded}
+                            onChange={(e) => setTripEditBoxesLoaded(e.target.value)}
+                            placeholder="Total Boxes"
+                            className="w-full px-2.5 py-1 border border-indigo-300 rounded-lg font-mono font-black text-xs bg-white text-indigo-950 focus:ring-2 focus:ring-indigo-500 shadow-inner"
+                          />
+                        </div>
+                        <span className="text-[9px] text-slate-500 mt-1 block">प्रिंट पर दिखेगा: <strong className="font-mono text-indigo-900">{tripEditBoxesLoaded || totalTripCartons} Boxes</strong></span>
                       </div>
 
-                      {/* Driver Name & Location */}
-                      <div>
-                        <label className="block text-[11px] font-black text-slate-700 mb-1 flex items-center gap-1">
-                          <i className="fa-solid fa-id-card text-blue-700"></i> Driver Name & Beat
-                        </label>
-                        <input
-                          type="text"
-                          value={tripEditDriver}
-                          onChange={(e) => setTripEditDriver(e.target.value)}
-                          placeholder="Driver ka naam"
-                          className="w-full px-3 py-1.5 border border-blue-300 rounded-xl font-bold text-xs bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 shadow-sm mb-1"
-                        />
-                        <input
-                          type="text"
-                          value={tripEditDriverLocation}
-                          onChange={(e) => setTripEditDriverLocation(e.target.value)}
-                          placeholder="Driver Area / Beat"
-                          className="w-full px-2.5 py-1 border border-blue-200 rounded-lg text-[10px] bg-slate-50 text-slate-700"
-                        />
+                      {/* 3. Driver Name & Beat */}
+                      <div className="bg-white p-2.5 rounded-xl border border-blue-200 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[11px] font-black text-blue-950 flex items-center gap-1">
+                              <i className="fa-solid fa-id-card text-blue-700"></i> Driver & Beat
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuickAddCat('drivers');
+                                setQuickAddName('');
+                                setQuickAddExtra('');
+                              }}
+                              className="text-[10px] font-bold text-blue-700 hover:text-blue-900 underline flex items-center gap-0.5"
+                              title="नया ड्राइवर जोड़ें"
+                            >
+                              <i className="fa-solid fa-circle-plus"></i> + New Driver
+                            </button>
+                          </div>
+
+                          {/* Select from saved drivers */}
+                          <select
+                            onChange={(e) => {
+                              const found = crewMaster.drivers.find(d => d.name === e.target.value);
+                              if (found) {
+                                setTripEditDriver(found.name);
+                                if (found.beat) setTripEditDriverLocation(found.beat);
+                              }
+                            }}
+                            className="w-full px-2 py-0.5 mb-1 border border-blue-300 rounded text-[10px] font-bold bg-blue-50/60 text-blue-950 truncate"
+                          >
+                            <option value="">-- ड्राइवर चुनें ({crewMaster.drivers.length}) --</option>
+                            {crewMaster.drivers.map(d => (
+                              <option key={d.id} value={d.name}>{d.name} {d.beat ? `(${d.beat})` : ''}</option>
+                            ))}
+                          </select>
+
+                          <input
+                            type="text"
+                            value={tripEditDriver}
+                            onChange={(e) => setTripEditDriver(e.target.value)}
+                            placeholder="Driver Name"
+                            className="w-full px-2.5 py-1 border border-blue-300 rounded-lg font-bold text-xs bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 mb-1"
+                          />
+                          <input
+                            type="text"
+                            value={tripEditDriverLocation}
+                            onChange={(e) => setTripEditDriverLocation(e.target.value)}
+                            placeholder="Beat / Route Area"
+                            className="w-full px-2 py-0.5 border border-blue-200 rounded text-[10px] bg-slate-50 text-slate-700"
+                          />
+                        </div>
                       </div>
 
-                      {/* Loader Name & Location */}
-                      <div>
-                        <label className="block text-[11px] font-black text-purple-900 mb-1 flex items-center gap-1">
-                          <i className="fa-solid fa-boxes-packing text-purple-700"></i> Loader (LDR) & Bay
-                        </label>
-                        <input
-                          type="text"
-                          value={tripEditLoader}
-                          onChange={(e) => setTripEditLoader(e.target.value)}
-                          placeholder="Loader ka naam"
-                          className="w-full px-3 py-1.5 border border-purple-300 rounded-xl font-bold text-xs bg-white text-purple-950 focus:ring-2 focus:ring-purple-500 shadow-sm mb-1"
-                        />
-                        <input
-                          type="text"
-                          value={tripEditLoaderLocation}
-                          onChange={(e) => setTripEditLoaderLocation(e.target.value)}
-                          placeholder="Dock / Bay Location"
-                          className="w-full px-2.5 py-1 border border-purple-200 rounded-lg text-[10px] bg-slate-50 text-slate-700"
-                        />
+                      {/* 4. Loader (LDR) & Bay */}
+                      <div className="bg-white p-2.5 rounded-xl border border-purple-200 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[11px] font-black text-purple-950 flex items-center gap-1">
+                              <i className="fa-solid fa-boxes-packing text-purple-700"></i> Loader (LDR) & Bay
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuickAddCat('loaders');
+                                setQuickAddName('');
+                                setQuickAddExtra('');
+                              }}
+                              className="text-[10px] font-bold text-purple-700 hover:text-purple-900 underline flex items-center gap-0.5"
+                              title="नया लोडर जोड़ें"
+                            >
+                              <i className="fa-solid fa-circle-plus"></i> + New Loader
+                            </button>
+                          </div>
+
+                          {/* Select from saved loaders */}
+                          <select
+                            onChange={(e) => {
+                              const found = crewMaster.loaders.find(l => l.name === e.target.value);
+                              if (found) {
+                                setTripEditLoader(found.name);
+                                if (found.bay) setTripEditLoaderLocation(found.bay);
+                              }
+                            }}
+                            className="w-full px-2 py-0.5 mb-1 border border-purple-300 rounded text-[10px] font-bold bg-purple-50/60 text-purple-950 truncate"
+                          >
+                            <option value="">-- लोडर चुनें ({crewMaster.loaders.length}) --</option>
+                            {crewMaster.loaders.map(l => (
+                              <option key={l.id} value={l.name}>{l.name} {l.bay ? `(${l.bay})` : ''}</option>
+                            ))}
+                          </select>
+
+                          <input
+                            type="text"
+                            value={tripEditLoader}
+                            onChange={(e) => setTripEditLoader(e.target.value)}
+                            placeholder="Loader Name"
+                            className="w-full px-2.5 py-1 border border-purple-300 rounded-lg font-bold text-xs bg-white text-purple-950 focus:ring-2 focus:ring-purple-500 mb-1"
+                          />
+                          <input
+                            type="text"
+                            value={tripEditLoaderLocation}
+                            onChange={(e) => setTripEditLoaderLocation(e.target.value)}
+                            placeholder="Loading Bay / Dock"
+                            className="w-full px-2 py-0.5 border border-purple-200 rounded text-[10px] bg-slate-50 text-slate-700"
+                          />
+                        </div>
                       </div>
 
-                      {/* Cashier / Collection & Location */}
-                      <div>
-                        <label className="block text-[11px] font-black text-emerald-900 mb-1 flex items-center gap-1">
-                          <i className="fa-solid fa-hand-holding-dollar text-emerald-700"></i> Cashier & Location
-                        </label>
-                        <input
-                          type="text"
-                          value={tripEditCashier}
-                          onChange={(e) => setTripEditCashier(e.target.value)}
-                          placeholder="Cashier ka naam"
-                          className="w-full px-3 py-1.5 border border-emerald-300 rounded-xl font-bold text-xs bg-white text-emerald-950 focus:ring-2 focus:ring-emerald-500 shadow-sm mb-1"
-                        />
-                        <input
-                          type="text"
-                          value={tripEditCashierLocation}
-                          onChange={(e) => setTripEditCashierLocation(e.target.value)}
-                          placeholder="Counter / Beat Location"
-                          className="w-full px-2.5 py-1 border border-emerald-200 rounded-lg text-[10px] bg-slate-50 text-slate-700"
-                        />
+                      {/* 5. Cashier / Collection & Location */}
+                      <div className="bg-white p-2.5 rounded-xl border border-emerald-200 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[11px] font-black text-emerald-950 flex items-center gap-1">
+                              <i className="fa-solid fa-hand-holding-dollar text-emerald-700"></i> Cashier & Location
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQuickAddCat('cashiers');
+                                setQuickAddName('');
+                                setQuickAddExtra('');
+                              }}
+                              className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 underline flex items-center gap-0.5"
+                              title="नया कैशियर जोड़ें"
+                            >
+                              <i className="fa-solid fa-circle-plus"></i> + New Cashier
+                            </button>
+                          </div>
+
+                          {/* Select from saved cashiers */}
+                          <select
+                            onChange={(e) => {
+                              const found = crewMaster.cashiers.find(c => c.name === e.target.value);
+                              if (found) {
+                                setTripEditCashier(found.name);
+                                if (found.location) setTripEditCashierLocation(found.location);
+                              }
+                            }}
+                            className="w-full px-2 py-0.5 mb-1 border border-emerald-300 rounded text-[10px] font-bold bg-emerald-50/60 text-emerald-950 truncate"
+                          >
+                            <option value="">-- कैशियर चुनें ({crewMaster.cashiers.length}) --</option>
+                            {crewMaster.cashiers.map(c => (
+                              <option key={c.id} value={c.name}>{c.name} {c.location ? `(${c.location})` : ''}</option>
+                            ))}
+                          </select>
+
+                          <input
+                            type="text"
+                            value={tripEditCashier}
+                            onChange={(e) => setTripEditCashier(e.target.value)}
+                            placeholder="Cashier Name"
+                            className="w-full px-2.5 py-1 border border-emerald-300 rounded-lg font-bold text-xs bg-white text-emerald-950 focus:ring-2 focus:ring-emerald-500 mb-1"
+                          />
+                          <input
+                            type="text"
+                            value={tripEditCashierLocation}
+                            onChange={(e) => setTripEditCashierLocation(e.target.value)}
+                            placeholder="Counter Location"
+                            className="w-full px-2 py-0.5 border border-emerald-200 rounded text-[10px] bg-slate-50 text-slate-700"
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -6128,10 +6463,195 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                       <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
                         Evening Van Return & Cash Settlement (शाम की वैन वापसी व रोकड़ मिलान)
                       </h2>
-                      <p className="text-xs text-slate-500">
-                        Van: <strong className="font-mono text-slate-800">{tripEditVan}</strong> | Driver: <strong>{tripEditDriver}</strong> ({tripEditDriverLocation}) | Loader: <strong>{tripEditLoader}</strong> | Cashier: <strong>{tripEditCashier}</strong> ({tripEditCashierLocation})
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 mt-0.5">
+                        <span>Van: <strong className="font-mono text-cadbury-900 font-black">{tripEditVan}</strong></span>
+                        <span>| Boxes: <strong className="font-mono text-indigo-900 font-black">{tripEditBoxesLoaded || '54'}</strong></span>
+                        <span>| Driver: <strong>{tripEditDriver}</strong> ({tripEditDriverLocation})</span>
+                        <span>| Loader: <strong>{tripEditLoader}</strong> ({tripEditLoaderLocation})</span>
+                        <span>| Cashier: <strong>{tripEditCashier}</strong> ({tripEditCashierLocation})</span>
+                        <button
+                          type="button"
+                          onClick={() => setIsEveningCrewEditorOpen(prev => !prev)}
+                          className="px-2 py-0.5 bg-purple-100 hover:bg-purple-200 text-purple-900 border border-purple-300 rounded font-bold text-[10px] inline-flex items-center gap-1 active:scale-95 transition-all shadow-sm"
+                          title="शाम के इस लोड के लिए वैन, ड्राइवर, लोडर या कैशियर बदलें"
+                        >
+                          <i className="fa-solid fa-user-pen text-purple-700"></i>
+                          <span>{isEveningCrewEditorOpen ? '▲ Hide Editor' : '✏️ वैन / स्टाफ बदलें (Change Staff)'}</span>
+                        </button>
+                      </div>
                     </div>
+
+                    {isEveningCrewEditorOpen && (
+                      <div className="p-3 bg-gradient-to-r from-amber-50 via-purple-50 to-indigo-50 border border-purple-300 rounded-xl shadow-sm space-y-2.5">
+                        <div className="flex items-center justify-between border-b border-purple-200 pb-1.5">
+                          <span className="text-xs font-black text-cadbury-950 flex items-center gap-1.5">
+                            <i className="fa-solid fa-truck text-cadbury-700"></i>
+                            शाम के लोड #{selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableLoadNumbers[0] || '193')} हेतु गाड़ी व स्टाफ चयन
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setIsCrewMasterModalOpen(true)}
+                            className="text-[10px] font-bold text-cadbury-700 hover:underline flex items-center gap-1"
+                          >
+                            <i className="fa-solid fa-users-gear"></i> मास्टर लिस्ट खोलें
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 text-xs">
+                          {/* Van */}
+                          <div className="bg-white p-2 rounded-lg border border-purple-200">
+                            <label className="text-[10px] font-bold text-slate-700 block mb-0.5">Van No. (V1 to V6)</label>
+                            <div className="flex flex-wrap gap-1 mb-1">
+                              {crewMaster.vans.slice(0, 6).map(v => (
+                                <button
+                                  key={v.id}
+                                  type="button"
+                                  onClick={() => setTripEditVan(v.name)}
+                                  className={`px-1.5 py-0.2 rounded text-[9px] font-black ${
+                                    tripEditVan.toUpperCase() === v.name.toUpperCase()
+                                      ? 'bg-cadbury-900 text-white'
+                                      : 'bg-slate-100 text-slate-700'
+                                  }`}
+                                >
+                                  {v.name}
+                                </button>
+                              ))}
+                            </div>
+                            <input
+                              type="text"
+                              value={tripEditVan}
+                              onChange={(e) => setTripEditVan(e.target.value.toUpperCase())}
+                              className="w-full px-2 py-0.5 border border-purple-300 rounded text-xs font-mono font-bold"
+                            />
+                          </div>
+
+                          {/* Boxes */}
+                          <div className="bg-white p-2 rounded-lg border border-indigo-200">
+                            <label className="text-[10px] font-bold text-indigo-900 block mb-0.5">Boxes Loaded</label>
+                            <input
+                              type="number"
+                              value={tripEditBoxesLoaded}
+                              onChange={(e) => setTripEditBoxesLoaded(e.target.value)}
+                              className="w-full px-2 py-1 border border-indigo-300 rounded text-xs font-mono font-bold text-indigo-950"
+                            />
+                            <span className="text-[9px] text-slate-500 mt-0.5 block">डिफ़ॉल्ट: {tripEditBoxesLoaded || '54'} Bx</span>
+                          </div>
+
+                          {/* Driver */}
+                          <div className="bg-white p-2 rounded-lg border border-blue-200">
+                            <label className="text-[10px] font-bold text-blue-900 block mb-0.5">Driver & Beat</label>
+                            <select
+                              onChange={(e) => {
+                                const found = crewMaster.drivers.find(d => d.name === e.target.value);
+                                if (found) {
+                                  setTripEditDriver(found.name);
+                                  if (found.beat) setTripEditDriverLocation(found.beat);
+                                }
+                              }}
+                              className="w-full px-1.5 py-0.5 mb-1 border border-blue-300 rounded text-[10px] font-bold bg-blue-50 text-blue-950"
+                            >
+                              <option value="">-- ड्राइवर चुनें --</option>
+                              {crewMaster.drivers.map(d => (
+                                <option key={d.id} value={d.name}>{d.name} {d.beat ? `(${d.beat})` : ''}</option>
+                              ))}
+                            </select>
+                            <input
+                              type="text"
+                              value={tripEditDriver}
+                              onChange={(e) => setTripEditDriver(e.target.value)}
+                              className="w-full px-2 py-0.5 border border-blue-300 rounded text-xs font-bold mb-0.5"
+                            />
+                            <input
+                              type="text"
+                              value={tripEditDriverLocation}
+                              onChange={(e) => setTripEditDriverLocation(e.target.value)}
+                              placeholder="Beat / Route"
+                              className="w-full px-1.5 py-0.5 border border-blue-200 rounded text-[9px] text-slate-600"
+                            />
+                          </div>
+
+                          {/* Loader */}
+                          <div className="bg-white p-2 rounded-lg border border-purple-200">
+                            <label className="text-[10px] font-bold text-purple-900 block mb-0.5">Loader & Bay</label>
+                            <select
+                              onChange={(e) => {
+                                const found = crewMaster.loaders.find(l => l.name === e.target.value);
+                                if (found) {
+                                  setTripEditLoader(found.name);
+                                  if (found.bay) setTripEditLoaderLocation(found.bay);
+                                }
+                              }}
+                              className="w-full px-1.5 py-0.5 mb-1 border border-purple-300 rounded text-[10px] font-bold bg-purple-50 text-purple-950"
+                            >
+                              <option value="">-- लोडर चुनें --</option>
+                              {crewMaster.loaders.map(l => (
+                                <option key={l.id} value={l.name}>{l.name} {l.bay ? `(${l.bay})` : ''}</option>
+                              ))}
+                            </select>
+                            <input
+                              type="text"
+                              value={tripEditLoader}
+                              onChange={(e) => setTripEditLoader(e.target.value)}
+                              className="w-full px-2 py-0.5 border border-purple-300 rounded text-xs font-bold mb-0.5"
+                            />
+                            <input
+                              type="text"
+                              value={tripEditLoaderLocation}
+                              onChange={(e) => setTripEditLoaderLocation(e.target.value)}
+                              placeholder="Bay / Dock"
+                              className="w-full px-1.5 py-0.5 border border-purple-200 rounded text-[9px] text-slate-600"
+                            />
+                          </div>
+
+                          {/* Cashier */}
+                          <div className="bg-white p-2 rounded-lg border border-emerald-200">
+                            <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">Cashier & Counter</label>
+                            <select
+                              onChange={(e) => {
+                                const found = crewMaster.cashiers.find(c => c.name === e.target.value);
+                                if (found) {
+                                  setTripEditCashier(found.name);
+                                  if (found.location) setTripEditCashierLocation(found.location);
+                                }
+                              }}
+                              className="w-full px-1.5 py-0.5 mb-1 border border-emerald-300 rounded text-[10px] font-bold bg-emerald-50 text-emerald-950"
+                            >
+                              <option value="">-- कैशियर चुनें --</option>
+                              {crewMaster.cashiers.map(c => (
+                                <option key={c.id} value={c.name}>{c.name} {c.location ? `(${c.location})` : ''}</option>
+                              ))}
+                            </select>
+                            <input
+                              type="text"
+                              value={tripEditCashier}
+                              onChange={(e) => setTripEditCashier(e.target.value)}
+                              className="w-full px-2 py-0.5 border border-emerald-300 rounded text-xs font-bold mb-0.5"
+                            />
+                            <input
+                              type="text"
+                              value={tripEditCashierLocation}
+                              onChange={(e) => setTripEditCashierLocation(e.target.value)}
+                              placeholder="Counter Location"
+                              className="w-full px-1.5 py-0.5 border border-emerald-200 rounded text-[9px] text-slate-600"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-[10px] text-slate-500 italic">प्रिंटआउट व सेटलमेंट वाउचर पर यही वैन व स्टाफ दर्ज होगा।</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleSaveTripCrew();
+                              setIsEveningCrewEditorOpen(false);
+                            }}
+                            className="px-3 py-1 bg-cadbury-900 hover:bg-cadbury-950 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1 active:scale-95"
+                          >
+                            <i className="fa-solid fa-floppy-disk text-gold-400"></i>
+                            <span>💾 Apply & Update Bills (लागू करें)</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap items-center gap-2">
                       {/* Direct Bridge to Morning Trip Loading Sheet */}
@@ -8528,6 +9048,321 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                 type="button"
                 onClick={() => setIsBackupModalOpen(false)}
                 className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl transition-all"
+              >
+                बंद करें (Close)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QUICK ADD CREW ITEM POPUP (Van, Driver, Loader, Cashier) */}
+      {quickAddCat && (
+        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl p-5 w-full max-w-md border-2 border-cadbury-900 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <h3 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                {quickAddCat === 'vans' && <><i className="fa-solid fa-truck text-cadbury-700"></i> नई डिलीवरी वैन जोड़ें (Add Delivery Van)</>}
+                {quickAddCat === 'drivers' && <><i className="fa-solid fa-id-card text-blue-700"></i> नया ड्राइवर व बीट जोड़ें (Add Driver & Beat)</>}
+                {quickAddCat === 'loaders' && <><i className="fa-solid fa-boxes-packing text-purple-700"></i> नया लोडर व बे जोड़ें (Add Loader & Bay)</>}
+                {quickAddCat === 'cashiers' && <><i className="fa-solid fa-hand-holding-dollar text-emerald-700"></i> नया कैशियर व काउंटर जोड़ें (Add Cashier)</>}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setQuickAddCat(null)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <i className="fa-solid fa-xmark text-base"></i>
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  {quickAddCat === 'vans' ? 'Van Number / Name (e.g. V7, V8, MH 02 EK 9999) *' :
+                   quickAddCat === 'drivers' ? 'Driver Name (e.g. Praveen Kumar) *' :
+                   quickAddCat === 'loaders' ? 'Loader Name (e.g. Suraj (LDR)) *' :
+                   'Cashier / Collection Name (e.g. Manish (Cashier)) *'}
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={quickAddName}
+                  onChange={(e) => setQuickAddName(e.target.value)}
+                  placeholder="नाम या नंबर दर्ज करें..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-cadbury-600"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  {quickAddCat === 'vans' ? 'Vehicle Type / Model (e.g. Tata Ace, Mahindra Bolero)' :
+                   quickAddCat === 'drivers' ? 'Assigned Beat / Area (e.g. Bhandup West Beat)' :
+                   quickAddCat === 'loaders' ? 'Warehouse Bay / Dock (e.g. Bay 2, Dock 4)' :
+                   'Collection Counter / Location (e.g. Station Road Counter)'}
+                </label>
+                <input
+                  type="text"
+                  value={quickAddExtra}
+                  onChange={(e) => setQuickAddExtra(e.target.value)}
+                  placeholder="विवरण दर्ज करें..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-slate-800 focus:ring-2 focus:ring-cadbury-600"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setQuickAddCat(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl"
+              >
+                रद्द करें (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!quickAddName.trim()) {
+                    alert('कृपया नाम या नंबर दर्ज करें');
+                    return;
+                  }
+                  handleSaveCrewMasterItem(quickAddCat, quickAddName, quickAddExtra);
+                  setQuickAddCat(null);
+                  setTripCrewSavedMsg(`✅ ${quickAddName} सफलतापूर्वक मास्टर लिस्ट में जुड़ गया व चुन लिया गया!`);
+                  setTimeout(() => setTripCrewSavedMsg(''), 4000);
+                }}
+                className="px-4 py-2 bg-cadbury-900 hover:bg-cadbury-950 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 active:scale-95"
+              >
+                <i className="fa-solid fa-floppy-disk text-gold-400"></i>
+                <span>💾 Save & Apply (सेव व लागू करें)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FULL CREW & FLEET MASTER MANAGER MODAL */}
+      {isCrewMasterModalOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-3xl border-2 border-cadbury-900 space-y-4 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-900 text-[10px] font-black uppercase mb-1">
+                  <i className="fa-solid fa-users-gear text-purple-700"></i> Fleet & Staff Master Management
+                </div>
+                <h3 className="font-black text-slate-900 text-lg flex items-center gap-2">
+                  👥 वैन, ड्राइवर, लोडर व कैशियर मास्टर (Fleet & Crew Master)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  यहां से आप नई डिलीवरी वैन (V1 से V6 व अन्य), नए ड्राइवर, लोडर और कैशियर जोड़ या हटा सकते हैं।
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCrewMasterModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <i className="fa-solid fa-xmark text-lg"></i>
+              </button>
+            </div>
+
+            {/* Category Tabs */}
+            <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
+              <button
+                type="button"
+                onClick={() => { setCrewModalTab('vans'); setCrewNewNameInput(''); setCrewNewExtraInput(''); }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all ${
+                  crewModalTab === 'vans'
+                    ? 'bg-cadbury-900 text-white shadow-md'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <i className="fa-solid fa-truck"></i>
+                <span>🚚 Vans ({crewMaster.vans.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setCrewModalTab('drivers'); setCrewNewNameInput(''); setCrewNewExtraInput(''); }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all ${
+                  crewModalTab === 'drivers'
+                    ? 'bg-blue-700 text-white shadow-md'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <i className="fa-solid fa-id-card"></i>
+                <span>🪪 Drivers ({crewMaster.drivers.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setCrewModalTab('loaders'); setCrewNewNameInput(''); setCrewNewExtraInput(''); }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all ${
+                  crewModalTab === 'loaders'
+                    ? 'bg-purple-700 text-white shadow-md'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <i className="fa-solid fa-boxes-packing"></i>
+                <span>📦 Loaders ({crewMaster.loaders.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setCrewModalTab('cashiers'); setCrewNewNameInput(''); setCrewNewExtraInput(''); }}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all ${
+                  crewModalTab === 'cashiers'
+                    ? 'bg-emerald-700 text-white shadow-md'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <i className="fa-solid fa-hand-holding-dollar"></i>
+                <span>💵 Cashiers ({crewMaster.cashiers.length})</span>
+              </button>
+            </div>
+
+            {/* Quick Add Form for Active Tab */}
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+              <span className="text-xs font-bold text-slate-700 block">
+                {crewModalTab === 'vans' ? '➕ नई वैन जोड़ें (e.g. V7, Tata Ace, MH 02...):' :
+                 crewModalTab === 'drivers' ? '➕ नया ड्राइवर जोड़ें (नाम व बीट/एरिया):' :
+                 crewModalTab === 'loaders' ? '➕ नया लोडर जोड़ें (नाम व वेयरहाउस बे):' :
+                 '➕ नया कैशियर जोड़ें (नाम व काउंटर लोकेशन):'}
+              </span>
+              <div className="flex flex-col sm:flex-row items-center gap-2">
+                <input
+                  type="text"
+                  value={crewNewNameInput}
+                  onChange={(e) => setCrewNewNameInput(e.target.value)}
+                  placeholder={
+                    crewModalTab === 'vans' ? 'Van No (e.g. V7, MH 02 AB 1234)' :
+                    crewModalTab === 'drivers' ? 'Driver Name (e.g. Ramesh)' :
+                    crewModalTab === 'loaders' ? 'Loader Name (e.g. Arjun (LDR))' :
+                    'Cashier Name (e.g. Tejas (Cashier))'
+                  }
+                  className="w-full sm:w-1/2 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-bold"
+                />
+                <input
+                  type="text"
+                  value={crewNewExtraInput}
+                  onChange={(e) => setCrewNewExtraInput(e.target.value)}
+                  placeholder={
+                    crewModalTab === 'vans' ? 'Model / Type (e.g. Tata Ace)' :
+                    crewModalTab === 'drivers' ? 'Beat (e.g. Bhandup West Beat)' :
+                    crewModalTab === 'loaders' ? 'Bay Location (e.g. Bay 2)' :
+                    'Counter Location (e.g. Village Road)'
+                  }
+                  className="w-full sm:w-1/2 px-3 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-700"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!crewNewNameInput.trim()) {
+                      alert('कृपया नाम या नंबर दर्ज करें');
+                      return;
+                    }
+                    handleSaveCrewMasterItem(crewModalTab, crewNewNameInput, crewNewExtraInput);
+                    setCrewNewNameInput('');
+                    setCrewNewExtraInput('');
+                  }}
+                  className="w-full sm:w-auto px-4 py-1.5 bg-cadbury-900 hover:bg-cadbury-950 text-white font-bold text-xs rounded-lg shadow-sm whitespace-nowrap active:scale-95"
+                >
+                  <i className="fa-solid fa-plus mr-1"></i> Add to Master
+                </button>
+              </div>
+            </div>
+
+            {/* List / Table of Items */}
+            <div className="overflow-x-auto max-h-72 border border-slate-200 rounded-xl">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead className="bg-slate-100 uppercase text-[10px] font-bold text-slate-700 sticky top-0">
+                  <tr>
+                    <th className="p-2 border-b border-slate-200 w-10 text-center">#</th>
+                    <th className="p-2 border-b border-slate-200">नाम / नंबर (Name)</th>
+                    <th className="p-2 border-b border-slate-200">
+                      {crewModalTab === 'vans' ? 'गाड़ी का प्रकार (Type)' :
+                       crewModalTab === 'drivers' ? 'बीट / एरिया (Beat)' :
+                       crewModalTab === 'loaders' ? 'बे लोकेशन (Bay)' :
+                       'काउंटर लोकेशन (Location)'}
+                    </th>
+                    <th className="p-2 border-b border-slate-200 text-center w-36">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {crewMaster[crewModalTab]?.map((item, idx) => {
+                    const extraVal = (item as any).type || (item as any).beat || (item as any).bay || (item as any).location || '-';
+                    const isCurrentlySelected =
+                      crewModalTab === 'vans' ? tripEditVan.toUpperCase() === item.name.toUpperCase() :
+                      crewModalTab === 'drivers' ? tripEditDriver.toLowerCase() === item.name.toLowerCase() :
+                      crewModalTab === 'loaders' ? tripEditLoader.toLowerCase() === item.name.toLowerCase() :
+                      tripEditCashier.toLowerCase() === item.name.toLowerCase();
+
+                    return (
+                      <tr key={item.id || idx} className="hover:bg-slate-50">
+                        <td className="p-2 text-center text-slate-400 font-mono text-[10px]">{idx + 1}</td>
+                        <td className="p-2 font-bold text-slate-900 flex items-center gap-1.5">
+                          {crewModalTab === 'vans' && <i className="fa-solid fa-truck text-cadbury-700 text-[11px]"></i>}
+                          {crewModalTab === 'drivers' && <i className="fa-solid fa-id-card text-blue-700 text-[11px]"></i>}
+                          {crewModalTab === 'loaders' && <i className="fa-solid fa-boxes-packing text-purple-700 text-[11px]"></i>}
+                          {crewModalTab === 'cashiers' && <i className="fa-solid fa-hand-holding-dollar text-emerald-700 text-[11px]"></i>}
+                          <span>{item.name}</span>
+                          {isCurrentlySelected && (
+                            <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded-full">
+                              Active
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-2 text-slate-600">{extraVal}</td>
+                        <td className="p-2 text-center space-x-1 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (crewModalTab === 'vans') setTripEditVan(item.name);
+                              if (crewModalTab === 'drivers') {
+                                setTripEditDriver(item.name);
+                                if ((item as any).beat) setTripEditDriverLocation((item as any).beat);
+                              }
+                              if (crewModalTab === 'loaders') {
+                                setTripEditLoader(item.name);
+                                if ((item as any).bay) setTripEditLoaderLocation((item as any).bay);
+                              }
+                              if (crewModalTab === 'cashiers') {
+                                setTripEditCashier(item.name);
+                                if ((item as any).location) setTripEditCashierLocation((item as any).location);
+                              }
+                              setIsCrewMasterModalOpen(false);
+                            }}
+                            className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-[10px] rounded border border-emerald-300"
+                            title="इस ट्रिप के लिए चुनें"
+                          >
+                            ✓ Select
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCrewMasterItem(crewModalTab, item.id, item.name)}
+                            className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-[10px] rounded border border-rose-300"
+                            title="मास्टर से हटाएं"
+                          >
+                            <i className="fa-solid fa-trash-can"></i>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Close footer */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+              <span className="text-[11px] text-slate-500 italic">
+                💡 यहां जो भी वैन, ड्राइवर, लोडर या कैशियर जोड़ेंगे वह हमेशा के लिए सुरक्षित रहेगा।
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsCrewMasterModalOpen(false)}
+                className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl"
               >
                 बंद करें (Close)
               </button>

@@ -53,6 +53,13 @@ async function startServer() {
     payments: PaymentTransaction[];
     returns: SalesReturn[];
     users: AppUser[];
+    tripSettlements?: any[];
+    crewMaster?: {
+      vans: Array<{ id: string; name: string; type?: string }>;
+      drivers: Array<{ id: string; name: string; beat?: string }>;
+      loaders: Array<{ id: string; name: string; bay?: string }>;
+      cashiers: Array<{ id: string; name: string; location?: string }>;
+    };
   } = {
     products: [],
     parties: [],
@@ -62,7 +69,9 @@ async function startServer() {
     loaderTasks: [],
     payments: [],
     returns: [],
-    users: []
+    users: [],
+    tripSettlements: [],
+    crewMaster: undefined
   };
 
   function loadStore() {
@@ -328,6 +337,95 @@ async function startServer() {
     saveStore();
     io.emit("vehicle_telemetry", store.vehicles);
     res.json({ success: true, vehicle: newVeh });
+  });
+
+  // Fleet & Trip Crew Master APIs (Vans, Drivers, Loaders, Cashiers)
+  function ensureCrewMaster() {
+    if (!store.crewMaster) {
+      store.crewMaster = {
+        vans: [
+          { id: 'v1', name: 'V1', type: 'Tata Ace (Van 1)' },
+          { id: 'v2', name: 'V2', type: 'Mahindra Bolero (Van 2)' },
+          { id: 'v3', name: 'V3', type: 'Tata 407 (Van 3)' },
+          { id: 'v4', name: 'V4', type: 'Van 4' },
+          { id: 'v5', name: 'V5', type: 'Van 5' },
+          { id: 'v6', name: 'V6', type: 'Van 6' },
+          { id: 'v-mh02', name: 'MH 02 EK 4589', type: 'Tata Ace V2' },
+          { id: 'v-mh04', name: 'MH 04 AB 1234', type: 'Mahindra Bolero V1' },
+          { id: 'v-mh03', name: 'MH 03 CD 5678', type: 'Tata 407 V3' }
+        ],
+        drivers: [
+          { id: 'd1', name: 'Santosh Yadav', beat: 'Bhandup West Beat / Station Road' },
+          { id: 'd2', name: 'Krishna', beat: 'Bhandup Station Road / Village Road' },
+          { id: 'd3', name: 'Ramesh Kumar', beat: 'Mulund West Beat' },
+          { id: 'd4', name: 'Mukesh Sharma', beat: 'Kanjurmarg Beat' }
+        ],
+        loaders: [
+          { id: 'l1', name: 'subham (LDR)', bay: 'Central Warehouse Bay 1' },
+          { id: 'l2', name: 'Arjun (LDR)', bay: 'Central Warehouse Bay 2' },
+          { id: 'l3', name: 'Ramesh (LDR)', bay: 'Central Warehouse Bay 3' },
+          { id: 'l4', name: 'Ganesh (LDR)', bay: 'Loading Dock Bay 4' }
+        ],
+        cashiers: [
+          { id: 'c1', name: 'tejas (Cashier)', location: 'Village Road Collection Counter' },
+          { id: 'c2', name: 'Adarsh (Cashier)', location: 'Station Road Counter' },
+          { id: 'c3', name: 'Vikas (Cashier)', location: 'Main Cash Counter' },
+          { id: 'c4', name: 'Sunil (Cashier)', location: 'Market Collection Counter' }
+        ]
+      };
+    }
+  }
+
+  app.get("/api/cadbury/crew-master", (req, res) => {
+    ensureCrewMaster();
+    res.json(store.crewMaster);
+  });
+
+  app.post("/api/cadbury/crew-master", (req, res) => {
+    ensureCrewMaster();
+    const { category, item } = req.body;
+    if (!category || !item || !item.name) {
+      return res.status(400).json({ error: "category ('vans'|'drivers'|'loaders'|'cashiers') and item.name are required" });
+    }
+    const catList = (store.crewMaster as any)[category] as any[];
+    if (!Array.isArray(catList)) {
+      return res.status(400).json({ error: "Invalid category" });
+    }
+
+    const trimmedName = String(item.name).trim();
+    const existingIdx = catList.findIndex((x: any) => x.name.toLowerCase() === trimmedName.toLowerCase() || (item.id && x.id === item.id));
+    const newItem = {
+      id: item.id || `crew-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      name: trimmedName,
+      ...(item.type ? { type: item.type } : {}),
+      ...(item.beat ? { beat: item.beat } : {}),
+      ...(item.bay ? { bay: item.bay } : {}),
+      ...(item.location ? { location: item.location } : {})
+    };
+
+    if (existingIdx >= 0) {
+      catList[existingIdx] = { ...catList[existingIdx], ...newItem };
+    } else {
+      catList.push(newItem);
+    }
+
+    saveStore();
+    io.emit("crew_master_updated", store.crewMaster);
+    res.json({ success: true, item: newItem, crewMaster: store.crewMaster });
+  });
+
+  app.delete("/api/cadbury/crew-master/:category/:id", (req, res) => {
+    ensureCrewMaster();
+    const { category, id } = req.params;
+    if (!store.crewMaster || !Array.isArray((store.crewMaster as any)[category])) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+    (store.crewMaster as any)[category] = ((store.crewMaster as any)[category] as any[]).filter(
+      x => x.id !== id && x.name.toLowerCase() !== id.toLowerCase()
+    );
+    saveStore();
+    io.emit("crew_master_updated", store.crewMaster);
+    res.json({ success: true, crewMaster: store.crewMaster });
   });
 
   // 6. Orders & Billing
