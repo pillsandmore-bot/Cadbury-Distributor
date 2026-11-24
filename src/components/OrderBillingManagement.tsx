@@ -135,7 +135,8 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
   const [pastSettlements, setPastSettlements] = useState<any[]>([]);
   const [showPastSettlementsTab, setShowPastSettlementsTab] = useState<boolean>(false);
 
-  // Cash Deposit Envelope Slip & Excel Import State (कैश लिफाफा रसीद व एक्सेल इम्पोर्ट)
+  // Morning Trip Loading Sheet & Evening Settlement File Input Refs
+  const morningTripImportInputRef = useRef<HTMLInputElement>(null);
   const eveningImportInputRef = useRef<HTMLInputElement>(null);
   const [isEnvelopeSlipModalOpen, setIsEnvelopeSlipModalOpen] = useState<boolean>(false);
   const [envelopeDenominations, setEnvelopeDenominations] = useState<{ n500: string; n200: string; n100: string; n50: string; n20: string; n10: string; coins: string }>({
@@ -2163,6 +2164,360 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
     });
   };
 
+  // Import Morning Loading Sheet (सुबह का लोडिंग चालान - केवल लोडिंग व डिस्पैच, साथ ही रोकड़ पाए जाने पर स्मार्ट मिलान)
+  const handleImportMorningLoadingSheet = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const isExcel = /\.(xlsx|xls|xlsm|xlsb)$/i.test(file.name);
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        let workbook: XLSX.WorkBook;
+        let fileRawText = '';
+        if (isExcel) {
+          const buffer = evt.target?.result as ArrayBuffer;
+          workbook = XLSX.read(buffer, { type: 'array' });
+        } else {
+          fileRawText = (evt.target?.result as string) || '';
+          workbook = XLSX.read(fileRawText, { type: 'string' });
+        }
+
+        let newlyCreatedOrders: Order[] = [];
+        let detectedLoadNo = '';
+        let detectedVanNo = '';
+        let detectedDate = '';
+        let totalDispatchedFromFile = 0;
+        let updatedBillsState = { ...settlementBillsState };
+        let parsedCash = 0;
+        let parsedCredit = 0;
+        let newCheques: any[] = [];
+        let newUpis: any[] = [];
+        let newReturns: any[] = [];
+        let hasEveningData = false;
+
+        for (const sheetName of workbook.SheetNames) {
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+
+          if (!jsonRows || jsonRows.length === 0) continue;
+
+          // 1. Extract metadata from top rows (Load No, Van No, Load Date)
+          for (let r = 0; r < Math.min(10, jsonRows.length); r++) {
+            const rowStr = (jsonRows[r] || []).join(' ');
+            if (!detectedLoadNo) {
+              const mLoad = rowStr.match(/Load\s*(?:No|#)?\s*[:.\s-]*([0-9A-Za-z-]+)/i);
+              if (mLoad && mLoad[1]) detectedLoadNo = mLoad[1].replace(/,/g, '').trim();
+            }
+            if (!detectedVanNo) {
+              const mVan = rowStr.match(/Van\s*(?:No|#)?\s*[:.\s-]*([0-9A-Za-z-]+)/i);
+              if (mVan && mVan[1]) detectedVanNo = mVan[1].replace(/,/g, '').trim();
+            }
+            if (!detectedDate) {
+              const mDate = rowStr.match(/Load\s*Date\s*[:.\s-]*([0-9/-]+)/i) || rowStr.match(/Date\s*[:.\s-]*([0-9/-]+)/i);
+              if (mDate && mDate[1]) detectedDate = mDate[1].replace(/,/g, '').trim();
+            }
+          }
+
+          // 2. Identify header row
+          let headerRowIndex = -1;
+          let colMap: Record<string, number> = {};
+
+          for (let r = 0; r < Math.min(20, jsonRows.length); r++) {
+            const row = jsonRows[r];
+            if (!Array.isArray(row)) continue;
+            const strRow = row.map(c => String(c).trim().toLowerCase());
+
+            const hasBill = strRow.some(c => c.includes('bill') || c.includes('order') || c.includes('inv'));
+            const hasAmtOrParty = strRow.some(c => c.includes('amount') || c.includes('party') || c.includes('customer') || c.includes('amt') || c.includes('total') || c.includes('cash') || c.includes('cheque'));
+            
+            if (hasBill && hasAmtOrParty) {
+              headerRowIndex = r;
+              strRow.forEach((c, idx) => {
+                if (c.includes('bill date') || c === 'date' || c.includes('दिनांक')) colMap.billDate = idx;
+                else if (c.includes('bill no') || c === 'bill' || c.includes('order no') || c === 'inv' || c === '#') colMap.billNo = idx;
+                else if (c.includes('party') || c.includes('customer') || c.includes('client') || c.includes('दुकान') || c.includes('party name')) colMap.party = idx;
+                else if (c.includes('amount') || c === 'amt' || c.includes('total bill') || c.includes('रकम') || c.includes('value')) colMap.amount = idx;
+                else if (c.includes('box') || c.includes('carton') || c.includes('qty')) colMap.cartons = idx;
+                else if (c === 'cash' || c.includes('रोकड़') || c.includes('नकद')) colMap.cash = idx;
+                else if (c.includes('cheque') || c.includes('check') || c.includes('चेक') || c === 'chq') colMap.cheque = idx;
+                else if (c.includes('upi') || c.includes('qr') || c.includes('digital') || c.includes('online')) colMap.upi = idx;
+                else if (c === 'rtn' || c.includes('return') || c.includes('वापसी') || c === 'ret') colMap.return = idx;
+                else if (c.includes('credit') || c.includes('उधारी') || c === 'cr') colMap.credit = idx;
+                else if (c.includes('remark') || c.includes('reason') || c.includes('note') || c.includes('टिप्पणी') || c.includes('narration')) colMap.remark = idx;
+              });
+              break;
+            }
+          }
+
+          if (headerRowIndex !== -1 && (colMap.billNo !== undefined || colMap.party !== undefined)) {
+            // Bill-wise table rows
+            for (let r = headerRowIndex + 1; r < jsonRows.length; r++) {
+              const row = jsonRows[r];
+              if (!row || row.length === 0) continue;
+
+              const firstCell = String(row[0] || '').toLowerCase();
+              const secondCell = String(row[1] || '').toLowerCase();
+              const thirdCell = String(row[2] || '').toLowerCase();
+
+              // Check for TOTALS row
+              if (firstCell.includes('total') || secondCell.includes('total') || thirdCell.includes('total')) {
+                continue;
+              }
+
+              const billRaw = colMap.billNo !== undefined ? String(row[colMap.billNo] || '').trim() : '';
+              const partyRaw = colMap.party !== undefined ? String(row[colMap.party] || '').trim() : '';
+              if (!billRaw && !partyRaw) continue;
+
+              const partyCode = partyRaw.match(/\((.*?)\)/)?.[1]?.trim() || '';
+              const cleanPartyName = partyRaw.replace(/\(.*?\)/, '').trim() || partyRaw || `Party-${r}`;
+
+              const amtRaw = colMap.amount !== undefined ? String(row[colMap.amount] || '').trim() : '';
+              const totalBillAmt = parseFloat(amtRaw.replace(/[^0-9.]/g, '')) || 0;
+              if (totalBillAmt <= 0 && !partyRaw) continue;
+
+              const billDateRaw = colMap.billDate !== undefined ? String(row[colMap.billDate] || '').trim() : '';
+              const billKey = billRaw || `BILL-${r}`;
+              totalDispatchedFromFile += totalBillAmt;
+
+              const orderCartons = colMap.cartons !== undefined 
+                ? (parseInt(String(row[colMap.cartons]).replace(/\D/g, '')) || Math.max(1, Math.round(totalBillAmt / 2500)))
+                : Math.max(1, Math.round(totalBillAmt / 2500));
+
+              // Check if evening collection columns exist in this sheet
+              const cashStr = colMap.cash !== undefined ? String(row[colMap.cash] || '').trim() : '';
+              const chqStr = colMap.cheque !== undefined ? String(row[colMap.cheque] || '').trim() : '';
+              const upiStr = colMap.upi !== undefined ? String(row[colMap.upi] || '').trim() : '';
+              const rtnStr = colMap.return !== undefined ? String(row[colMap.return] || '').trim() : '';
+              const remStr = colMap.remark !== undefined ? String(row[colMap.remark] || '').trim() : '';
+
+              const isCancel = cashStr.toUpperCase().includes('CANCEL') || remStr.toUpperCase().includes('CREDIT NOTE') || remStr.toUpperCase().includes('CANCEL');
+              const isSignBill = cashStr.toUpperCase().includes('SIGN BILL') || remStr.toUpperCase().includes('SIGN BILL');
+
+              const rowCash = (!isCancel && !isSignBill && cashStr) ? (parseFloat(cashStr.replace(/[^0-9.]/g, '')) || 0) : 0;
+              const rowCheque = chqStr ? (parseFloat(chqStr.replace(/[^0-9.]/g, '')) || 0) : 0;
+              const rowUpi = upiStr ? (parseFloat(upiStr.replace(/[^0-9.]/g, '')) || 0) : 0;
+              const rowRtn = rtnStr ? (parseFloat(rtnStr.replace(/[^0-9.]/g, '')) || 0) : 0;
+
+              let rowHasEvening = (rowCash > 0 || rowCheque > 0 || rowUpi > 0 || rowRtn > 0 || isCancel || isSignBill);
+              if (rowHasEvening) {
+                hasEveningData = true;
+              }
+
+              let deliveryStatus = 'Pending';
+              let paymentMode = 'CASH';
+              let paidAmt = 0;
+              let stageStatus = GoodsStage.IN_TRANSIT;
+
+              if (rowHasEvening) {
+                if (isCancel) {
+                  deliveryStatus = 'Cancelled';
+                  paymentMode = 'CREDIT';
+                  paidAmt = 0;
+                  stageStatus = (GoodsStage?.DELIVERED || 'Delivered') as any;
+                  newReturns.push({
+                    id: `ret-${Date.now()}-${r}`,
+                    partyName: cleanPartyName,
+                    cartons: 1,
+                    amount: totalBillAmt,
+                    reason: 'Credit Note / Cancelled Bill'
+                  });
+                } else if (isSignBill) {
+                  deliveryStatus = 'Delivered';
+                  paymentMode = 'CREDIT';
+                  paidAmt = 0;
+                  parsedCredit += totalBillAmt;
+                  stageStatus = (GoodsStage?.DELIVERED || 'Delivered') as any;
+                } else {
+                  deliveryStatus = rowRtn > 0 ? 'Partial' : 'Delivered';
+                  stageStatus = (GoodsStage?.DELIVERED || 'Delivered') as any;
+
+                  if (rowCheque > 0) paymentMode = 'CHEQUE';
+                  else if (rowUpi > 0) paymentMode = 'UPI';
+                  else paymentMode = 'CASH';
+
+                  paidAmt = rowCash + rowCheque + rowUpi;
+                  if (rowCash > 0) parsedCash += rowCash;
+
+                  if (rowCheque > 0) {
+                    newCheques.push({
+                      id: `chq-${Date.now()}-${r}`,
+                      chequeNo: billRaw.replace(/\D/g, '') || `CHQ-${r}`,
+                      bankName: 'Cheque',
+                      partyName: cleanPartyName,
+                      amount: rowCheque
+                    });
+                  }
+                  if (rowUpi > 0) {
+                    newUpis.push({
+                      id: `upi-${Date.now()}-${r}`,
+                      upiRef: `UPI-${billRaw.replace(/\D/g, '') || r}`,
+                      partyName: cleanPartyName,
+                      amount: rowUpi
+                    });
+                  }
+                  if (rowRtn > 0) {
+                    newReturns.push({
+                      id: `ret-${Date.now()}-${r}`,
+                      partyName: cleanPartyName,
+                      cartons: 1,
+                      amount: rowRtn,
+                      reason: remStr || 'Partial Return / Return Goods'
+                    });
+                  }
+                }
+
+                updatedBillsState[billKey] = {
+                  orderId: billKey,
+                  orderNumber: billKey,
+                  partyName: cleanPartyName,
+                  partyCode,
+                  totalBill: totalBillAmt,
+                  cashAmount: rowCash,
+                  chequeAmount: rowCheque,
+                  upiAmount: rowUpi,
+                  rtnAmount: rowRtn,
+                  deliveryStatus,
+                  paymentMode,
+                  paidAmount: paidAmt,
+                  pendingAmount: isSignBill ? totalBillAmt : Math.max(0, totalBillAmt - paidAmt - rowRtn),
+                  notes: remStr || (isCancel ? 'CANCEL' : isSignBill ? 'SIGN BILL' : '')
+                };
+              }
+
+              newlyCreatedOrders.push({
+                id: `ord-morn-${Date.now()}-${r}`,
+                orderNumber: billKey,
+                invoiceNumber: `INV-${billKey.replace(/\D/g, '') || r}`,
+                partyId: partyCode || `pty-morn-${r}`,
+                partyName: cleanPartyName,
+                partyAddress: 'Market, Mumbai',
+                partyArea: 'Mumbai',
+                partyMobile: '9820000000',
+                partyGst: '27AABCC1234F1Z5',
+                partyLat: 19.1136,
+                partyLng: 72.8697,
+                items: [
+                  {
+                    productId: 'cad-1',
+                    productCode: 'CAD-DM-01',
+                    productName: 'Cadbury Assorted',
+                    category: (CadburyProductCategory?.DAIRY_MILK || 'Cadbury Dairy Milk') as any,
+                    cartons: orderCartons,
+                    units: orderCartons * 240,
+                    ratePerCarton: Math.round(totalBillAmt / orderCartons),
+                    discountPercent: 0,
+                    gstPercent: 18,
+                    totalAmount: totalBillAmt
+                  }
+                ],
+                totalCartons: orderCartons,
+                subtotal: Math.round(totalBillAmt / 1.18),
+                discountAmount: 0,
+                gstAmount: Math.round(totalBillAmt - (totalBillAmt / 1.18)),
+                totalBill: totalBillAmt,
+                orderDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
+                deliveryDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
+                stage: stageStatus,
+                loadingStatus: 'Loaded',
+                cartonsLoaded: orderCartons,
+                deliveryStatus: (rowHasEvening ? deliveryStatus : 'Pending') as any,
+                deliverySequence: r,
+                paymentStatus: rowHasEvening ? (isSignBill ? 'Pending' : (rowRtn > 0 ? 'Partial' : 'Paid')) : 'Pending',
+                paidAmount: rowHasEvening ? paidAmt : 0,
+                pendingAmount: rowHasEvening ? (isSignBill ? totalBillAmt : Math.max(0, totalBillAmt - paidAmt - rowRtn)) : totalBillAmt,
+                vehicleNumber: detectedVanNo || tripEditVan || 'V1',
+                driverName: tripEditDriver || 'Santosh Yadav',
+                loaderName: tripEditLoader || 'subham (LDR)',
+                cashierName: tripEditCashier || 'tejas (Cashier)',
+                billType: isSignBill ? 'CREDIT' : 'CASH',
+                loadNumber: detectedLoadNo || selectedTripLoadNo || '193',
+                deliveryRemarks: remStr || (rowHasEvening ? '' : 'Morning Dispatch')
+              });
+            }
+          }
+        }
+
+        if (detectedLoadNo) setSelectedTripLoadNo(detectedLoadNo);
+        if (detectedVanNo) setTripEditVan(detectedVanNo);
+
+        const totalBoxes = newlyCreatedOrders.reduce((s, o) => s + (o.totalCartons || 1), 0);
+        setTripEditBoxesLoaded(String(totalBoxes || 54));
+
+        if (hasEveningData) {
+          setSettlementBillsState(updatedBillsState);
+          setSettlementActualCash(String(parsedCash));
+          handleAutoBreakdownDenominations(parsedCash);
+          setSettlementCreditAllowed(String(parsedCredit));
+          setChequesList(newCheques);
+          setUpisList(newUpis);
+          setReturnsList(newReturns);
+          const retBoxes = newReturns.length;
+          setSettlementBoxesDelivered(String(Math.max(0, totalBoxes - retBoxes)));
+          setSettlementBoxesReturned(String(retBoxes));
+        }
+
+        if (newlyCreatedOrders.length > 0) {
+          setImportedEveningOrders(newlyCreatedOrders);
+          try {
+            if (onImportOrders) {
+              await onImportOrders(newlyCreatedOrders);
+            } else {
+              await fetch('/api/cadbury/orders/bulk-import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ orders: newlyCreatedOrders })
+              });
+            }
+          } catch (apiErr) {
+            console.warn('Server sync error on morning bulk orders import:', apiErr);
+          }
+        }
+
+        let msg = '';
+        if (hasEveningData) {
+          const totalReturnsAmt = newReturns.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+          msg = `✅ एक्सेल शीट सफलतापूर्वक इम्पोर्ट हुई!\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `• लोड नंबर (Load No): #${detectedLoadNo || '193'} | वैन: ${detectedVanNo || 'V1'}\n` +
+            `• कुल डिस्पैच बिल: ${newlyCreatedOrders.length} बिल | कुल रकम: ₹${totalDispatchedFromFile.toLocaleString('en-IN')}\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `💡 नोट: इस शीट में शाम की रोकड़, चेक, UPI व वापसी (RTN) का डेटा भी मिला।\n` +
+            `👉 इसे Trip Dispatch Sheet और Evening Settlement (शाम का रोकड़ मिलान) दोनों में सही तरीके से सेट कर दिया गया है ताकि कोई मिसमैच न हो!\n` +
+            `• नकद रोकड़ (CASH): ₹${parsedCash.toLocaleString('en-IN')}\n` +
+            `• चेक (CHEQUE): ₹${newCheques.reduce((s, c) => s + c.amount, 0).toLocaleString('en-IN')} (${newCheques.length} चेक)\n` +
+            `• डिजिटल (UPI): ₹${newUpis.reduce((s, u) => s + u.amount, 0).toLocaleString('en-IN')} (${newUpis.length} UPIs)\n` +
+            `• वापसी (RTN/Cancel): ₹${totalReturnsAmt.toLocaleString('en-IN')} (${newReturns.length} आइटम्स)\n` +
+            `• उधारी (SIGN BILL): ₹${parsedCredit.toLocaleString('en-IN')}`;
+        } else {
+          msg = `✅ सुबह का लोडिंग चालान (Morning Loading Sheet) सफलतापूर्वक इम्पोर्ट हुआ!\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `• लोड नंबर (Load No): #${detectedLoadNo || '193'}\n` +
+            `• वैन (Van No): ${detectedVanNo || 'V1'}\n` +
+            `• कुल डिस्पैच बिल: ${newlyCreatedOrders.length} बिल्स\n` +
+            `• कुल डिस्पैच रकम: ₹${totalDispatchedFromFile.toLocaleString('en-IN')}\n` +
+            `• कुल लोडेड बॉक्स: ${totalBoxes} Boxes\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `A4 Multi-page Loading Sheet तैयार है। आप इसे प्रिंट करके ड्राइवर को दे सकते हैं।\n` +
+            `शाम को वैन वापस आने पर "Evening Settlement" में रोकड़ व चेक का मिलान करें।`;
+        }
+
+        setTripCrewSavedMsg(msg);
+        alert(msg);
+      } catch (err: any) {
+        alert('Morning Loading Sheet Import Error: ' + (err.message || 'फाइल पढ़ने में समस्या आई'));
+      }
+    };
+
+    if (isExcel) {
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.readAsText(file);
+    }
+    e.target.value = '';
+  };
+
   // Import Evening Settlement Excel / CSV File Handler
   const handleImportEveningSettlement = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -3476,17 +3831,19 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
 
         <div className="flex flex-wrap items-center gap-2.5">
           <button
-            onClick={() => handleOpenTripSheet('189', 'ALL')}
+            onClick={() => handleOpenTripSheet(selectedTripLoadNo, 'ALL')}
             className="px-4 py-3 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 border border-purple-400/40 text-white font-black text-xs rounded-xl shadow-lg flex items-center gap-2 active:scale-95 transition-all"
+            title="सुबह जब वेयरहाउस से माल गाड़ी में लोड होकर निकलता है: लोडिंग शीट इम्पोर्ट व A4 प्रिंट निकालें"
           >
-            <i className="fa-solid fa-print text-gold-300"></i> 🖨️ Trip Dispatch & Loading Sheet (A4)
+            <i className="fa-solid fa-sun text-amber-300"></i> 🌞 Step 1: Trip Dispatch & Loading Sheet (सुबह का चालान)
           </button>
 
           <button
             onClick={() => handleOpenEveningSettlement(selectedTripLoadNo, selectedTripVehicle)}
             className="px-4 py-3 bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-800 hover:to-teal-800 border border-emerald-400/40 text-white font-black text-xs rounded-xl shadow-lg flex items-center gap-2 active:scale-95 transition-all"
+            title="शाम को जब गाड़ी वापस आती है: रोकड़, चेक, UPI, रिटर्न शीट अपलोड करें व लिफाफा रसीद प्रिंट करें"
           >
-            <i className="fa-solid fa-hand-holding-dollar text-gold-300"></i> 🌆 Evening Trip Settlement (शाम की वापसी व रोकड़)
+            <i className="fa-solid fa-hand-holding-dollar text-gold-300"></i> 🌆 Step 2: Evening Van Return & Cash Settlement (शाम की वापसी व रोकड़)
           </button>
 
           <button
@@ -4631,6 +4988,9 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
             {/* Modal Controls (Hidden in Print) */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3 no-print">
               <div>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-100 text-purple-900 text-xs font-black uppercase mb-1">
+                  <i className="fa-solid fa-sun text-amber-500"></i> 🌞 स्टेप 1: सुबह की प्रक्रिया — वेयरहाउस से गाड़ी लोडिंग व डिस्पैच चालान
+                </div>
                 <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
                   <i className="fa-solid fa-truck-ramp-box text-cadbury-700"></i>
                   Trip Dispatch & Loading Sheet (गाड़ी लोडिंग व रोकड़ चालान)
@@ -4641,9 +5001,43 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                {/* Hidden input for Morning Loading Sheet import */}
+                <input
+                  type="file"
+                  ref={morningTripImportInputRef}
+                  onChange={handleImportMorningLoadingSheet}
+                  accept=".xlsx,.xls,.xlsm,.xlsb,.csv,.tsv"
+                  className="hidden"
+                />
+
+                {/* Import Morning Loading Sheet Button */}
+                <button
+                  type="button"
+                  onClick={() => morningTripImportInputRef.current?.click()}
+                  className="px-3.5 py-2 bg-indigo-700 hover:bg-indigo-800 text-white text-xs font-black rounded-xl shadow-md flex items-center gap-1.5 active:scale-95 transition-all"
+                  title="सुबह वेयरहाउस से लोड होने वाले बिल्स / लोडिंग रिपोर्ट एक्सेल फ़ाइल से सीधे इम्पोर्ट करें"
+                >
+                  <i className="fa-solid fa-file-import text-indigo-200"></i>
+                  <span>📥 Import Morning Sheet (सुबह का चालान)</span>
+                </button>
+
+                {/* Direct Link to Evening Settlement */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsTripSheetModalOpen(false);
+                    handleOpenEveningSettlement(selectedTripLoadNo, selectedTripVehicle);
+                  }}
+                  className="px-3.5 py-2 bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 text-white text-xs font-black rounded-xl shadow-md flex items-center gap-1.5 active:scale-95 transition-all"
+                  title="शाम को गाड़ी लौटने पर रोकड़ व वापसी हिसाब के लिए Evening Settlement खोलें"
+                >
+                  <i className="fa-solid fa-hand-holding-dollar text-gold-300"></i>
+                  <span>🌆 Evening Settlement (शाम का रोकड़ मिलान) ➡️</span>
+                </button>
+
                 {/* Dynamic Load No Filter */}
                 <div className="flex items-center gap-1.5 text-xs">
-                  <span className="font-bold text-slate-600">Load No:</span>
+                  <span className="font-bold text-slate-600">Load:</span>
                   <select
                     value={selectedTripLoadNo}
                     onChange={(e) => setSelectedTripLoadNo(e.target.value)}
@@ -4758,11 +5152,7 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
 
             {/* PRINTABLE TRIP SHEET (Rendered & Print-Scoped) */}
             {(() => {
-              const tripOrders = orders.filter(o => {
-                const matchLoad = selectedTripLoadNo === 'ALL' || (o.loadNumber || '189') === selectedTripLoadNo;
-                const matchVeh = selectedTripVehicle === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === selectedTripVehicle;
-                return matchLoad && matchVeh;
-              });
+              const tripOrders = getActiveTripOrders(selectedTripLoadNo, selectedTripVehicle);
 
               const totalTripCartons = tripOrders.reduce((s, o) => s + (o.totalCartons || 0), 0);
               const totalTripBill = tripOrders.reduce((s, o) => s + (o.totalBill || 0), 0);
@@ -5653,11 +6043,11 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                   {/* Modal Header */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
                     <div>
-                      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold uppercase mb-1">
-                        <i className="fa-solid fa-calculator"></i> Evening Van Return & Cash Settlement
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 text-xs font-black uppercase mb-1">
+                        <i className="fa-solid fa-moon text-emerald-700"></i> 🌆 स्टेप 2: शाम की प्रक्रिया — वैन वापसी, रोकड़, चेक, UPI व वापसी माल मिलान
                       </div>
                       <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
-                        🌆 शाम की वैन वापसी व रोकड़ / डिलीवरी मिलान फ़ॉर्म
+                        Evening Van Return & Cash Settlement (शाम की वैन वापसी व रोकड़ मिलान)
                       </h2>
                       <p className="text-xs text-slate-500">
                         Van: <strong className="font-mono text-slate-800">{tripEditVan}</strong> | Driver: <strong>{tripEditDriver}</strong> ({tripEditDriverLocation}) | Loader: <strong>{tripEditLoader}</strong> | Cashier: <strong>{tripEditCashier}</strong> ({tripEditCashierLocation})
@@ -5665,6 +6055,21 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                      {/* Direct Bridge to Morning Trip Loading Sheet */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEveningSettlementModalOpen(false);
+                          syncTripParameters();
+                          setIsTripSheetModalOpen(true);
+                        }}
+                        className="px-3 py-1.5 bg-gradient-to-r from-indigo-700 to-cadbury-800 hover:from-indigo-800 text-white text-xs font-black rounded-xl shadow-md flex items-center gap-1.5 active:scale-95 transition-all"
+                        title="सुबह का लोडिंग व डिस्पैच चालान देखने या प्रिंट करने हेतु Step 1 खोलें"
+                      >
+                        <i className="fa-solid fa-truck-ramp-box text-amber-300"></i>
+                        <span>🌞 Step 1: Morning Sheet (सुबह का चालान) ⬅️</span>
+                      </button>
+
                       {/* Dynamic Load filter */}
                       <select
                         value={selectedTripLoadNo}
@@ -5699,7 +6104,7 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                         title="भरी हुई Excel/CSV शीट से रोकड़, चेक व डिलीवरी स्टेटस ऑटोमैटिक इम्पोर्ट करें"
                       >
                         <i className="fa-solid fa-file-import text-blue-200"></i>
-                        <span>📥 Import Excel / CSV</span>
+                        <span>📥 Import Evening Sheet (शाम की रोकड़ शीट)</span>
                       </button>
 
                       {/* Cash Deposit Envelope Slip (लिफाफा रसीद) */}
