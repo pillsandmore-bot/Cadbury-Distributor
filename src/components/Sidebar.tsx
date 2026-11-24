@@ -117,6 +117,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   ];
 
+  const isAdmin = currentUser.role === Role.ADMIN || currentUser.role === Role.SUPER_ADMIN;
+
+  const filteredNavItems = navItems.map(item => {
+    // 1. Strictly Admin Only for Users & Rights management
+    if (item.id === 'users' && !isAdmin) {
+      return null;
+    }
+
+    // 2. Check if user is allowed to access Admin Master Dashboard
+    if (item.id === 'dashboard' && !isAdmin && !currentUser.canAccessAdminDashboard && !currentUser.allowedModules?.includes('dashboard')) {
+      return null;
+    }
+
+    // 3. For single items
+    if (item.type === 'single') {
+      if (isAdmin) return item;
+      const isAllowed = currentUser.allowedModules?.includes(item.id);
+      return isAllowed ? item : null;
+    }
+
+    // 4. For group items (filter sub-items)
+    if (item.type === 'group' && item.children) {
+      if (isAdmin) return item;
+      const filteredChildren = item.children.filter(child => {
+        return currentUser.allowedModules?.includes(child.id) || currentUser.allowedModules?.includes(item.id);
+      });
+      if (filteredChildren.length === 0) return null;
+      return {
+        ...item,
+        children: filteredChildren
+      };
+    }
+
+    return item;
+  }).filter(Boolean) as typeof navItems;
+
   return (
     <>
       {/* Mobile Backdrop */}
@@ -170,7 +206,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Navigation Links Scrollable List */}
         <nav className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1 text-xs">
-          {navItems.map((item) => {
+          {filteredNavItems.map((item) => {
             if (item.type === 'single') {
               const isActive = activeTab === item.id;
               return (

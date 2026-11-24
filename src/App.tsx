@@ -385,17 +385,44 @@ export const App: React.FC = () => {
     }
   };
 
+  const isAdminUser = currentUser.role === Role.ADMIN || currentUser.role === Role.SUPER_ADMIN;
+
   const handleSwitchUserRole = (newUser: AppUser) => {
     setCurrentUser(newUser);
-    if (newUser.role === Role.LOADER) {
+    const isTargetAdmin = newUser.role === Role.ADMIN || newUser.role === Role.SUPER_ADMIN;
+    if (isTargetAdmin || newUser.canAccessAdminDashboard || newUser.allowedModules?.includes('dashboard')) {
+      setActiveTab('dashboard');
+    } else if (newUser.role === Role.LOADER) {
       setActiveTab('loader');
     } else if (newUser.role === Role.DELIVERY_BOY) {
       setActiveTab('delivery_boy');
     } else if (newUser.role === Role.ACCOUNTANT) {
-      setActiveTab('ledger');
+      setActiveTab('orders');
+    } else if (newUser.role === Role.SALESMAN) {
+      setActiveTab('orders');
+    } else if (newUser.allowedModules && newUser.allowedModules.length > 0) {
+      setActiveTab(newUser.allowedModules[0]);
     } else {
-      setActiveTab('dashboard');
+      setActiveTab('orders');
     }
+  };
+
+  const canAccessTab = (tab: string) => {
+    if (isAdminUser) return true;
+    if (tab === 'users') return false; // Users & Rights is strictly Admin only
+    if (tab === 'dashboard') return !!(currentUser.canAccessAdminDashboard || currentUser.allowedModules?.includes('dashboard'));
+    
+    if (currentUser.allowedModules) {
+      if (currentUser.allowedModules.includes(tab)) return true;
+      if (['stock', 'stock_in', 'returns'].includes(tab) && currentUser.allowedModules.includes('inventory')) return true;
+      if (['parties', 'ledger'].includes(tab) && currentUser.allowedModules.includes('parties')) return true;
+      if (['orders', 'pipeline'].includes(tab) && currentUser.allowedModules.includes('orders')) return true;
+      if (['loader', 'routes', 'delivery_boy'].includes(tab) && currentUser.allowedModules.includes('logistics')) return true;
+      if (['ledger', 'outstanding'].includes(tab) && currentUser.allowedModules.includes('accounts')) return true;
+      if (['map'].includes(tab) && currentUser.allowedModules.includes('tracking')) return true;
+      return false;
+    }
+    return true;
   };
 
   // Get current active tab title
@@ -476,24 +503,32 @@ export const App: React.FC = () => {
               <span>{socketConnected ? 'GPS Live Stream' : 'Connecting...'}</span>
             </div>
 
-            {/* Quick Role Switcher */}
-            <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs">
-              <i className="fa-solid fa-user-gear text-cadbury-700"></i>
-              <select
-                value={currentUser.id}
-                onChange={(e) => {
-                  const u = users.find(user => user.id === e.target.value);
-                  if (u) handleSwitchUserRole(u);
-                }}
-                className="bg-transparent text-slate-800 font-bold text-xs focus:outline-none cursor-pointer"
-              >
-                {users.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.role})
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Quick Role Switcher - ONLY FOR ADMIN */}
+            {isAdminUser ? (
+              <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs">
+                <i className="fa-solid fa-user-gear text-cadbury-700"></i>
+                <select
+                  value={currentUser.id}
+                  onChange={(e) => {
+                    const u = users.find(user => user.id === e.target.value);
+                    if (u) handleSwitchUserRole(u);
+                  }}
+                  className="bg-transparent text-slate-800 font-bold text-xs focus:outline-none cursor-pointer"
+                  title="एडमिन द्वारा टेस्ट करने हेतु रोल स्विच करें"
+                >
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-800 px-3 py-1.5 rounded-xl border border-emerald-200 text-xs font-bold">
+                <i className="fa-solid fa-user-check text-emerald-600"></i>
+                <span className="truncate max-w-[140px]">{currentUser.name.split(' ')[0]} ({currentUser.role})</span>
+              </div>
+            )}
 
             {/* Reset Button */}
             <button
@@ -516,130 +551,164 @@ export const App: React.FC = () => {
           </div>
         </header>
 
-        {/* Dynamic View Body */}
+        {/* Dynamic View Body with Access Permission Verification */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
           <ErrorBoundary>
-            {activeTab === 'dashboard' && (
-              <Dashboard
-                stats={stats}
-                vehicles={vehicles}
-                orders={orders}
-                parties={parties}
-                products={products}
-                onNavigateTab={setActiveTab}
-                onUpdateStage={handleUpdateStage}
-              />
-            )}
+            {!canAccessTab(activeTab) ? (
+              <div className="bg-white rounded-3xl p-8 border border-slate-200 text-center max-w-lg mx-auto space-y-4 shadow-xl my-12 animate-fadeIn">
+                <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center text-3xl mx-auto shadow-inner">
+                  <i className="fa-solid fa-lock"></i>
+                </div>
+                <h3 className="text-xl font-black text-slate-900">सुरक्षा प्रतिबंध (Access Restricted)</h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  आपके यूजर आईडी <strong>(@{currentUser.username})</strong> को इस मॉड्यूल का एक्सेस नहीं दिया गया है। 
+                  एडमिन डैशबोर्ड और गोपनीय डेटा सुरक्षित है।
+                </p>
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-semibold">
+                  यदि आपको इस कार्य की आवश्यकता है, तो कृपया डिस्ट्रीब्यूटर एडमिन से संपर्क करें।
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const fallback = (currentUser.allowedModules && currentUser.allowedModules.length > 0)
+                      ? currentUser.allowedModules[0]
+                      : 'orders';
+                    setActiveTab(fallback);
+                  }}
+                  className="px-5 py-2.5 bg-cadbury-900 hover:bg-cadbury-950 text-white text-xs font-bold rounded-xl shadow-md transition-all inline-flex items-center gap-1.5"
+                >
+                  <i className="fa-solid fa-arrow-left"></i>
+                  <span>अनुमत सेक्शन पर वापस जाएं</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                {activeTab === 'dashboard' && (
+                  <Dashboard
+                    stats={stats}
+                    vehicles={vehicles}
+                    orders={orders}
+                    parties={parties}
+                    products={products}
+                    onNavigateTab={setActiveTab}
+                    onUpdateStage={handleUpdateStage}
+                  />
+                )}
 
-            {(activeTab === 'stock' || activeTab === 'stock_in') && (
-              <StockInventoryManagement
-                products={products}
-                onUpdateProductStock={handleUpdateProductStock}
-              />
-            )}
+                {(activeTab === 'stock' || activeTab === 'stock_in') && (
+                  <StockInventoryManagement
+                    products={products}
+                    onUpdateProductStock={handleUpdateProductStock}
+                  />
+                )}
 
-            {activeTab === 'routes' && (
-              <RouteManagement
-                routes={routes}
-                parties={parties}
-                vehicles={vehicles}
-                onAddRoute={handleAddRoute}
-              />
-            )}
+                {activeTab === 'routes' && (
+                  <RouteManagement
+                    routes={routes}
+                    parties={parties}
+                    vehicles={vehicles}
+                    onAddRoute={handleAddRoute}
+                  />
+                )}
 
-            {activeTab === 'pipeline' && (
-              <GoodsTrackingPipeline
-                orders={orders}
-                onUpdateStage={handleUpdateStage}
-              />
-            )}
+                {activeTab === 'pipeline' && (
+                  <GoodsTrackingPipeline
+                    orders={orders}
+                    onUpdateStage={handleUpdateStage}
+                  />
+                )}
 
-            {activeTab === 'map' && (
-              <LiveVehicleMap
-                vehicles={vehicles}
-                orders={orders}
-                onUpdateVehicleStatus={handleUpdateVehicleStatus}
-                onUpdateVehicleCrew={handleUpdateVehicleCrew}
-                onAddNewVehicle={handleAddVehicle}
-              />
-            )}
+                {activeTab === 'map' && (
+                  <LiveVehicleMap
+                    vehicles={vehicles}
+                    orders={orders}
+                    onUpdateVehicleStatus={handleUpdateVehicleStatus}
+                    onUpdateVehicleCrew={handleUpdateVehicleCrew}
+                    onAddNewVehicle={handleAddVehicle}
+                  />
+                )}
 
-            {activeTab === 'parties' && (
-              <PartyManagement
-                parties={parties}
-                orders={orders}
-                payments={payments}
-                onAddParty={handleAddParty}
-                onUpdateParty={() => {}}
-                onSelectPartyLedger={() => setActiveTab('ledger')}
-              />
-            )}
+                {activeTab === 'parties' && (
+                  <PartyManagement
+                    parties={parties}
+                    orders={orders}
+                    payments={payments}
+                    onAddParty={handleAddParty}
+                    onUpdateParty={() => {}}
+                    onSelectPartyLedger={() => setActiveTab('ledger')}
+                  />
+                )}
 
-            {activeTab === 'orders' && (
-              <OrderBillingManagement
-                products={products}
-                parties={parties}
-                orders={orders}
-                vehicles={vehicles}
-                onCreateOrder={handleCreateOrder}
-                onImportOrders={handleImportOrders}
-                onAddNewVehicle={handleAddVehicle}
-              />
-            )}
+                {activeTab === 'orders' && (
+                  <OrderBillingManagement
+                    products={products}
+                    parties={parties}
+                    orders={orders}
+                    vehicles={vehicles}
+                    onCreateOrder={handleCreateOrder}
+                    onImportOrders={handleImportOrders}
+                    onAddNewVehicle={handleAddVehicle}
+                  />
+                )}
 
-            {activeTab === 'loader' && (
-              <LoaderDashboard
-                loaderTasks={loaderTasks}
-                orders={orders}
-                onUpdateLoaderTask={handleUpdateLoaderTask}
-              />
-            )}
+                {activeTab === 'loader' && (
+                  <LoaderDashboard
+                    loaderTasks={loaderTasks}
+                    orders={orders}
+                    onUpdateLoaderTask={handleUpdateLoaderTask}
+                  />
+                )}
 
-            {activeTab === 'delivery_boy' && (
-              <DeliveryBoyMobile
-                orders={orders}
-                onCompleteDelivery={handleCompleteDelivery}
-              />
-            )}
+                {activeTab === 'delivery_boy' && (
+                  <DeliveryBoyMobile
+                    orders={orders}
+                    onCompleteDelivery={handleCompleteDelivery}
+                  />
+                )}
 
-            {activeTab === 'returns' && (
-              <ReturnDamageManagement
-                returns={returns}
-                parties={parties}
-                orders={orders}
-                products={products}
-                onAddReturn={handleAddReturn}
-                onApproveReturn={handleApproveReturn}
-              />
-            )}
+                {activeTab === 'returns' && (
+                  <ReturnDamageManagement
+                    returns={returns}
+                    parties={parties}
+                    orders={orders}
+                    products={products}
+                    onAddReturn={handleAddReturn}
+                    onApproveReturn={handleApproveReturn}
+                  />
+                )}
 
-            {(activeTab === 'ledger' || activeTab === 'outstanding') && (
-              <HisabKitabLedger
-                parties={parties}
-                payments={payments}
-                orders={orders}
-                onRecordPayment={handleRecordPayment}
-              />
-            )}
+                {(activeTab === 'ledger' || activeTab === 'outstanding') && (
+                  <HisabKitabLedger
+                    parties={parties}
+                    payments={payments}
+                    orders={orders}
+                    onRecordPayment={handleRecordPayment}
+                  />
+                )}
 
-            {activeTab === 'reports' && (
-              <ReportsAnalytics
-                orders={orders}
-                parties={parties}
-                products={products}
-                vehicles={vehicles}
-                loaderTasks={loaderTasks}
-                payments={payments}
-                returns={returns}
-              />
-            )}
+                {activeTab === 'reports' && (
+                  <ReportsAnalytics
+                    orders={orders}
+                    parties={parties}
+                    products={products}
+                    vehicles={vehicles}
+                    loaderTasks={loaderTasks}
+                    payments={payments}
+                    returns={returns}
+                  />
+                )}
 
-            {activeTab === 'users' && (
-              <UserRoleManagement
-                users={users}
-                activeUser={currentUser}
-                onSwitchUser={handleSwitchUserRole}
-              />
+                {activeTab === 'users' && (
+                  <UserRoleManagement
+                    users={users}
+                    activeUser={currentUser}
+                    onSwitchUser={handleSwitchUserRole}
+                    onUserCreated={(newUser) => setUsers(prev => [...prev, newUser])}
+                    onUserUpdated={(updatedUser) => setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u))}
+                    onUserDeleted={(deletedId) => setUsers(prev => prev.filter(u => u.id !== deletedId))}
+                  />
+                )}
+              </>
             )}
           </ErrorBoundary>
         </main>

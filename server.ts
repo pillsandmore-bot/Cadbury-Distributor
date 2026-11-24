@@ -992,7 +992,156 @@ async function startServer() {
 
   // 12. Users
   app.get("/api/cadbury/users", (req, res) => {
-    res.json(store.users);
+    res.json(store.users || []);
+  });
+
+  // Create User
+  app.post("/api/cadbury/users", (req, res) => {
+    try {
+      const { name, username, password, role, phone, email, employeeId, vehicleAssigned, allowedModules, status, canEditOrders, canDeleteOrders, canExportReports, canAccessAdminDashboard } = req.body;
+      if (!name || !username) {
+        return res.status(400).json({ error: "Name aur Username zaroori hain" });
+      }
+
+      // Check username uniqueness
+      const existingUser = (store.users || []).find(u => u.username.toLowerCase() === String(username).trim().toLowerCase());
+      if (existingUser) {
+        return res.status(400).json({ error: `User ID "${username}" pehle se maujood hai. Kripya doosra Username chunein.` });
+      }
+
+      const newUser: AppUser = {
+        id: `usr-${Date.now()}`,
+        name: String(name).trim(),
+        username: String(username).trim(),
+        password: password ? String(password).trim() : 'cadbury123',
+        role: role || Role.SALESMAN,
+        phone: phone || '',
+        email: email || '',
+        employeeId: employeeId || `CAD-EMP-${Math.floor(100 + Math.random() * 900)}`,
+        vehicleAssigned: vehicleAssigned || '',
+        status: status || 'Active',
+        allowedModules: Array.isArray(allowedModules) ? allowedModules : ['orders', 'parties'],
+        canEditOrders: canEditOrders ?? true,
+        canDeleteOrders: canDeleteOrders ?? false,
+        canExportReports: canExportReports ?? true,
+        canAccessAdminDashboard: canAccessAdminDashboard ?? (role === Role.ADMIN),
+        createdAt: new Date().toISOString()
+      };
+
+      if (!store.users) store.users = [];
+      store.users.push(newUser);
+      saveStore();
+
+      io.emit("users_updated", store.users);
+      console.log(`👤 New user created: ${newUser.name} (${newUser.username}) [${newUser.role}]`);
+
+      res.status(201).json({ success: true, user: newUser, message: `User "${newUser.name}" safaltapoorvak ban gaya!` });
+    } catch (err: any) {
+      res.status(500).json({ error: "User create karne me samasya: " + err.message });
+    }
+  });
+
+  // Update User
+  app.put("/api/cadbury/users/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const index = (store.users || []).findIndex(u => u.id === id);
+      if (index === -1) {
+        return res.status(404).json({ error: "User nahi mila" });
+      }
+
+      const { name, username, password, role, phone, email, employeeId, vehicleAssigned, allowedModules, status, canEditOrders, canDeleteOrders, canExportReports, canAccessAdminDashboard } = req.body;
+
+      if (username) {
+        const duplicate = store.users.find(u => u.id !== id && u.username.toLowerCase() === String(username).trim().toLowerCase());
+        if (duplicate) {
+          return res.status(400).json({ error: `User ID "${username}" kisi doosre user ke paas pehle se hai.` });
+        }
+      }
+
+      const existing = store.users[index];
+      const updated: AppUser = {
+        ...existing,
+        name: name !== undefined ? String(name).trim() : existing.name,
+        username: username !== undefined ? String(username).trim() : existing.username,
+        password: password ? String(password).trim() : (existing.password || 'cadbury123'),
+        role: role !== undefined ? role : existing.role,
+        phone: phone !== undefined ? phone : existing.phone,
+        email: email !== undefined ? email : existing.email,
+        employeeId: employeeId !== undefined ? employeeId : existing.employeeId,
+        vehicleAssigned: vehicleAssigned !== undefined ? vehicleAssigned : existing.vehicleAssigned,
+        status: status !== undefined ? status : (existing.status || 'Active'),
+        allowedModules: Array.isArray(allowedModules) ? allowedModules : existing.allowedModules,
+        canEditOrders: canEditOrders !== undefined ? canEditOrders : existing.canEditOrders,
+        canDeleteOrders: canDeleteOrders !== undefined ? canDeleteOrders : existing.canDeleteOrders,
+        canExportReports: canExportReports !== undefined ? canExportReports : existing.canExportReports,
+        canAccessAdminDashboard: canAccessAdminDashboard !== undefined ? canAccessAdminDashboard : existing.canAccessAdminDashboard
+      };
+
+      store.users[index] = updated;
+      saveStore();
+
+      io.emit("users_updated", store.users);
+      console.log(`👤 User updated: ${updated.name} (${updated.username})`);
+
+      res.json({ success: true, user: updated, message: `User "${updated.name}" update ho gaya!` });
+    } catch (err: any) {
+      res.status(500).json({ error: "User update karne me samasya: " + err.message });
+    }
+  });
+
+  // Delete User
+  app.delete("/api/cadbury/users/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const userToDelete = (store.users || []).find(u => u.id === id);
+      if (!userToDelete) {
+        return res.status(404).json({ error: "User nahi mila" });
+      }
+
+      if (userToDelete.username === 'admin' || userToDelete.id === 'usr-1') {
+        return res.status(403).json({ error: "Main Admin user ko delete nahi kiya ja sakta!" });
+      }
+
+      store.users = store.users.filter(u => u.id !== id);
+      saveStore();
+
+      io.emit("users_updated", store.users);
+      console.log(`🗑️ User deleted: ${userToDelete.name} (${userToDelete.username})`);
+
+      res.json({ success: true, message: `User "${userToDelete.name}" safaltapoorvak delete kar diya gaya.` });
+    } catch (err: any) {
+      res.status(500).json({ error: "User delete karne me samasya: " + err.message });
+    }
+  });
+
+  // Authenticate / Login endpoint
+  app.post("/api/cadbury/auth/login", (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ success: false, message: "Username aur Password dono daalna zaroori hai." });
+      }
+
+      const user = (store.users || []).find(u => u.username.toLowerCase() === String(username).trim().toLowerCase());
+      if (!user) {
+        return res.status(401).json({ success: false, message: `User ID "${username}" exist nahi karta.` });
+      }
+
+      if (user.status === 'Inactive') {
+        return res.status(403).json({ success: false, message: "Aapka account Inactive/Disabled hai. Kripya Admin se sampark karein." });
+      }
+
+      // Check password (fallback to default 'cadbury123' if not set)
+      const userPass = user.password || 'cadbury123';
+      if (userPass !== String(password).trim()) {
+        return res.status(401).json({ success: false, message: "Galat Password! Kripya sahi password dalein." });
+      }
+
+      res.json({ success: true, user, message: `Swagatam, ${user.name}!` });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: "Login me takleef: " + err.message });
+    }
   });
 
   // 13. Reset / Seed Master Data

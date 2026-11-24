@@ -224,64 +224,172 @@
       "id": "usr-1",
       "name": "Amar Sharma (Admin / Owner)",
       "username": "admin",
+      "password": "cadbury123",
       "role": "Admin",
       "phone": "9820011223",
       "email": "admin@cadburydistributor.com",
-      "employeeId": "CAD-ADM-01"
+      "employeeId": "CAD-ADM-01",
+      "status": "Active",
+      "canAccessAdminDashboard": true,
+      "canEditOrders": true,
+      "canDeleteOrders": true,
+      "canExportReports": true,
+      "allowedModules": [
+        "dashboard",
+        "inventory",
+        "stock",
+        "stock_in",
+        "returns",
+        "parties",
+        "orders",
+        "pipeline",
+        "logistics",
+        "loader",
+        "routes",
+        "delivery_boy",
+        "tracking",
+        "map",
+        "accounts",
+        "ledger",
+        "outstanding",
+        "reports",
+        "users"
+      ]
     },
     {
       "id": "usr-2",
       "name": "Pradeep Verma (Manager)",
       "username": "manager",
+      "password": "cadbury123",
       "role": "Manager",
       "phone": "9820022334",
       "email": "manager@cadburydistributor.com",
-      "employeeId": "CAD-MGR-01"
+      "employeeId": "CAD-MGR-01",
+      "status": "Active",
+      "canAccessAdminDashboard": false,
+      "canEditOrders": true,
+      "canDeleteOrders": false,
+      "canExportReports": true,
+      "allowedModules": [
+        "inventory",
+        "stock",
+        "stock_in",
+        "returns",
+        "parties",
+        "orders",
+        "pipeline",
+        "logistics",
+        "loader",
+        "routes",
+        "delivery_boy",
+        "tracking",
+        "map",
+        "reports"
+      ]
     },
     {
       "id": "usr-3",
       "name": "Kavita Shah (Accountant)",
       "username": "accountant",
+      "password": "cadbury123",
       "role": "Accountant",
       "phone": "9820033445",
       "email": "accounts@cadburydistributor.com",
-      "employeeId": "CAD-ACC-01"
+      "employeeId": "CAD-ACC-01",
+      "status": "Active",
+      "canAccessAdminDashboard": false,
+      "canEditOrders": true,
+      "canDeleteOrders": false,
+      "canExportReports": true,
+      "allowedModules": [
+        "parties",
+        "ledger",
+        "orders",
+        "accounts",
+        "outstanding",
+        "reports"
+      ]
     },
     {
       "id": "usr-4",
       "name": "Loader Ramesh",
       "username": "loader_ramesh",
+      "password": "cadbury123",
       "role": "Loader",
       "phone": "9820044556",
       "email": "loader1@cadburydistributor.com",
-      "employeeId": "CAD-LDR-01"
+      "employeeId": "CAD-LDR-01",
+      "status": "Active",
+      "canAccessAdminDashboard": false,
+      "canEditOrders": false,
+      "canDeleteOrders": false,
+      "canExportReports": false,
+      "allowedModules": [
+        "logistics",
+        "loader"
+      ]
     },
     {
       "id": "usr-5",
       "name": "Driver 1 (Raju Pandey)",
       "username": "driver_raju",
+      "password": "cadbury123",
       "role": "Driver",
       "phone": "9820055667",
       "email": "driver1@cadburydistributor.com",
-      "employeeId": "CAD-DRV-01"
+      "employeeId": "CAD-DRV-01",
+      "status": "Active",
+      "canAccessAdminDashboard": false,
+      "canEditOrders": false,
+      "canDeleteOrders": false,
+      "canExportReports": false,
+      "allowedModules": [
+        "logistics",
+        "routes",
+        "delivery_boy",
+        "tracking",
+        "map"
+      ]
     },
     {
       "id": "usr-6",
       "name": "Delivery Boy Suresh",
       "username": "delivery_suresh",
+      "password": "cadbury123",
       "role": "Delivery Boy",
       "phone": "9820066778",
       "email": "delivery1@cadburydistributor.com",
-      "employeeId": "CAD-DLV-01"
+      "employeeId": "CAD-DLV-01",
+      "status": "Active",
+      "canAccessAdminDashboard": false,
+      "canEditOrders": false,
+      "canDeleteOrders": false,
+      "canExportReports": false,
+      "allowedModules": [
+        "logistics",
+        "delivery_boy",
+        "tracking",
+        "map"
+      ]
     },
     {
       "id": "usr-7",
       "name": "Salesman Rahul",
       "username": "sales_rahul",
+      "password": "cadbury123",
       "role": "Salesman",
       "phone": "9820077889",
       "email": "sales1@cadburydistributor.com",
-      "employeeId": "CAD-SLS-01"
+      "employeeId": "CAD-SLS-01",
+      "status": "Active",
+      "canAccessAdminDashboard": false,
+      "canEditOrders": true,
+      "canDeleteOrders": false,
+      "canExportReports": false,
+      "allowedModules": [
+        "parties",
+        "orders"
+      ]
     }
   ],
   "tripSettlements": []

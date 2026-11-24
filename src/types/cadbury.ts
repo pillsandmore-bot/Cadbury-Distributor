@@ -308,10 +308,18 @@ export interface AppUser {
     id: string;
     name: string;
     username: string;
+    password?: string;
     role: Role;
     phone: string;
     email: string;
     employeeId?: string;
     avatar?: string;
     vehicleAssigned?: string;
+    status?: 'Active' | 'Inactive';
+    allowedModules?: string[];
+    canEditOrders?: boolean;
+    canDeleteOrders?: boolean;
+    canExportReports?: boolean;
+    canAccessAdminDashboard?: boolean;
+    createdAt?: string;
 }
