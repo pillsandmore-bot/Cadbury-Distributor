@@ -539,150 +539,225 @@ async function startServer() {
     }
 
     const createdOrders: Order[] = [];
+    const cleanStr = (s: any) => String(s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
     importedOrdersList.forEach((ordData: any, idx: number) => {
-      const orderNumber = ordData.orderNumber || `ORD-CAD-${store.orders.length + 101 + idx}`;
-      const invoiceNumber = ordData.invoiceNumber || `INV-2026-${store.orders.length + 101 + idx}`;
-      
-      let party = store.parties.find(p => 
-        (ordData.partyId && p.id === ordData.partyId) || 
-        p.name.toLowerCase() === (ordData.partyName || '').toLowerCase()
-      );
-
       const totalBill = Number(ordData.totalBill) || Number(ordData.subtotal) || 0;
       const totalCartons = Number(ordData.totalCartons) || (ordData.items ? ordData.items.reduce((s: number, i: any) => s + (Number(i.cartons) || 0), 0) : 5);
 
-      if (!party) {
-        party = {
-          id: `pty-imp-${Date.now()}-${idx}`,
-          code: `PTY-${store.parties.length + 101}`,
-          name: ordData.partyName || `Retail Customer ${idx + 1}`,
-          ownerName: ordData.partyName || 'Proprietor',
-          shopAddress: ordData.partyAddress || 'Shop No. 4, Market Road, Mumbai',
-          area: ordData.partyArea || 'Mumbai Zone',
-          pincode: '400093',
-          mobileNumber: ordData.partyMobile || `98200${Math.floor(10000 + Math.random() * 90000)}`,
-          gstNumber: ordData.partyGst || '27AABCC1234F1Z5',
-          creditLimit: 50000,
-          openingBalance: 0,
-          currentOutstanding: totalBill,
-          totalOrdersCount: 1,
-          latitude: 19.1136 + (Math.random() - 0.5) * 0.04,
-          longitude: 72.8697 + (Math.random() - 0.5) * 0.04,
-          lastOrderDate: ordData.orderDate || new Date().toISOString().split('T')[0]
-        };
-        store.parties.push(party);
-      } else {
-        party.currentOutstanding += totalBill;
-        party.lastOrderDate = ordData.orderDate || new Date().toISOString().split('T')[0];
-        party.totalOrdersCount = (party.totalOrdersCount || 0) + 1;
-      }
+      const inId = ordData.id ? String(ordData.id) : '';
+      const inOrdNo = cleanStr(ordData.orderNumber);
+      const inInvNo = cleanStr(ordData.invoiceNumber);
+      const inParty = cleanStr(ordData.partyName);
+      const inLoad = cleanStr(ordData.loadNumber);
 
-      const newOrder: Order = {
-        id: `ord-imp-${Date.now()}-${idx}`,
-        orderNumber,
-        invoiceNumber,
-        partyId: party ? party.id : (ordData.partyId || `pty-custom-${idx}`),
-        partyName: party ? party.name : (ordData.partyName || 'Retail Customer'),
-        partyAddress: party ? party.shopAddress : (ordData.partyAddress || 'Mumbai'),
-        partyArea: party ? party.area : (ordData.partyArea || 'Mumbai'),
-        partyMobile: party ? party.mobileNumber : (ordData.partyMobile || '9820000000'),
-        partyGst: party ? party.gstNumber : (ordData.partyGst || '27AABCC1234F1Z5'),
-        partyLat: party ? party.latitude : 19.2812,
-        partyLng: party ? party.longitude : 72.8561,
-        items: ordData.items && ordData.items.length > 0 ? ordData.items : [
-          {
-            productId: 'cad-1',
-            productCode: 'CAD-DM-01',
-            productName: ordData.productName || 'Cadbury Dairy Milk 13.2g',
-            category: 'Cadbury Dairy Milk',
-            cartons: totalCartons || 5,
-            units: (totalCartons || 5) * 240,
-            ratePerCarton: Math.round(totalBill / (totalCartons || 1)),
-            discountPercent: 0,
-            gstPercent: 18,
-            totalAmount: totalBill
+      // Check if this order already exists in store.orders (match by id, orderNumber, invoiceNumber, or partyName + loadNumber)
+      const existingIdx = store.orders.findIndex(o => {
+        if (inId && o.id === inId) return true;
+        const oNo = cleanStr(o.orderNumber);
+        const oInv = cleanStr(o.invoiceNumber);
+        const oParty = cleanStr(o.partyName);
+        const oLoad = cleanStr(o.loadNumber);
+
+        // Matching by Bill Number / Order Number
+        if (inOrdNo && oNo && (inOrdNo === oNo || inOrdNo.endsWith(oNo) || oNo.endsWith(inOrdNo))) {
+          return true;
+        }
+        if (inInvNo && oInv && (inInvNo === oInv || inInvNo.endsWith(oInv) || oInv.endsWith(inInvNo))) {
+          return true;
+        }
+        // Matching by same Load Number and same Party Name
+        if (inParty && oParty && (inParty === oParty || inParty.includes(oParty) || oParty.includes(inParty))) {
+          if (!inLoad || !oLoad || inLoad === oLoad) {
+            return true;
           }
-        ],
-        totalCartons,
-        subtotal: ordData.subtotal ? Number(ordData.subtotal) : Math.round(totalBill / 1.18),
-        discountAmount: Number(ordData.discountAmount) || 0,
-        gstAmount: ordData.gstAmount ? Number(ordData.gstAmount) : Math.round(totalBill - (totalBill / 1.18)),
-        totalBill,
-        orderDate: ordData.orderDate || new Date().toISOString().split('T')[0],
-        deliveryDate: ordData.deliveryDate || new Date().toISOString().split('T')[0],
-        stage: GoodsStage.WAREHOUSE,
-        loadingStatus: 'Pending',
-        cartonsLoaded: 0,
-        cartonsDifference: 0,
-        deliveryStatus: 'Pending',
-        deliverySequence: store.orders.length + 1,
-        paymentStatus: 'Pending',
-        paidAmount: 0,
-        pendingAmount: totalBill,
-        vehicleNumber: ordData.vehicleNumber || 'MH 02 EK 4589',
-        driverName: ordData.driverName || 'Santosh Yadav',
-        loaderName: ordData.loaderName || 'Ramesh Kumar',
-        cashierName: ordData.cashierName || ordData.deliveryBoyName || 'Suresh Patil',
-        deliveryBoyName: ordData.cashierName || ordData.deliveryBoyName || 'Suresh Patil',
-        billType: ordData.billType || (ordData.paymentMode === 'Credit' ? 'CREDIT' : 'CASH'),
-        loadNumber: ordData.loadNumber || '189',
-        salesmanCode: ordData.salesmanCode || ordData.sman || 'KR101'
-      };
+        }
+        return false;
+      });
 
-      // Loader Task
-      const loaderTask: LoaderTask = {
-        id: `lt-imp-${Date.now()}-${idx}`,
-        orderId: newOrder.id,
-        orderNumber: newOrder.orderNumber,
-        partyName: newOrder.partyName,
-        loaderName: newOrder.loaderName || 'Ramesh Kumar',
-        employeeId: 'LDR-001',
-        vehicleNumber: newOrder.vehicleNumber || 'MH 02 EK 4589',
-        loadingDate: newOrder.orderDate,
-        cartonsToLoad: newOrder.totalCartons,
-        cartonsLoaded: 0,
-        cartonsDifference: 0,
-        itemsChecklist: newOrder.items.map(it => ({
-          productName: it.productName,
-          ordered: it.cartons,
-          loaded: 0,
-          difference: 0
-        })),
-        status: 'Pending',
-        notes: 'Bulk Imported Order',
-        updatedAt: new Date().toISOString()
-      };
-      store.loaderTasks.push(loaderTask);
-
-      // Ledger Debit Entry
-      const ledgerEntry: PaymentTransaction = {
-        id: `pay-imp-${Date.now()}-${idx}`,
-        partyId: newOrder.partyId,
-        partyName: newOrder.partyName,
-        orderId: newOrder.id,
-        orderNumber: newOrder.orderNumber,
-        date: newOrder.orderDate,
-        type: 'INVOICE',
-        paymentMethod: 'Credit',
-        referenceNo: newOrder.invoiceNumber,
-        debitAmount: newOrder.totalBill,
-        creditAmount: 0,
-        runningBalance: party ? party.currentOutstanding : newOrder.totalBill,
-        collectedBy: 'Bill Import Desk',
-        notes: `Imported Tax Invoice (${newOrder.totalCartons} Box)`
-      };
-      store.payments.push(ledgerEntry);
-
-      // Update in-place if orderNumber already exists, otherwise unshift
-      const existingIdx = store.orders.findIndex(o => o.orderNumber === newOrder.orderNumber);
       if (existingIdx !== -1) {
-        store.orders[existingIdx] = { ...store.orders[existingIdx], ...newOrder, id: store.orders[existingIdx].id };
-        createdOrders.push(store.orders[existingIdx]);
+        // UPDATE EXISTING ORDER IN-PLACE (Crection / No Duplicates)
+        const existing = store.orders[existingIdx];
+        const prevBill = existing.totalBill || 0;
+        const billDiff = totalBill - prevBill;
+
+        existing.totalBill = totalBill;
+        existing.subtotal = ordData.subtotal ? Number(ordData.subtotal) : Math.round(totalBill / 1.18);
+        existing.gstAmount = ordData.gstAmount ? Number(ordData.gstAmount) : Math.round(totalBill - (totalBill / 1.18));
+        if (totalCartons) existing.totalCartons = totalCartons;
+        if (ordData.orderDate) existing.orderDate = ordData.orderDate;
+        if (ordData.deliveryDate) existing.deliveryDate = ordData.deliveryDate;
+        if (ordData.loadNumber) existing.loadNumber = ordData.loadNumber;
+        if (ordData.vehicleNumber) existing.vehicleNumber = ordData.vehicleNumber;
+        if (ordData.driverName) existing.driverName = ordData.driverName;
+        if (ordData.loaderName) existing.loaderName = ordData.loaderName;
+        if (ordData.cashierName) {
+          existing.cashierName = ordData.cashierName;
+          existing.deliveryBoyName = ordData.cashierName;
+        }
+        if (ordData.billType) existing.billType = ordData.billType;
+
+        // If evening settlement / payment details provided
+        if (ordData.paidAmount !== undefined) existing.paidAmount = ordData.paidAmount;
+        if (ordData.pendingAmount !== undefined) existing.pendingAmount = ordData.pendingAmount;
+        if (ordData.deliveryStatus) existing.deliveryStatus = ordData.deliveryStatus;
+        if (ordData.paymentStatus) existing.paymentStatus = ordData.paymentStatus;
+        if (ordData.paymentMode) existing.paymentMode = ordData.paymentMode;
+        if (ordData.cashAmount !== undefined) (existing as any).cashAmount = ordData.cashAmount;
+        if (ordData.chequeAmount !== undefined) (existing as any).chequeAmount = ordData.chequeAmount;
+        if (ordData.upiAmount !== undefined) (existing as any).upiAmount = ordData.upiAmount;
+        if (ordData.rtnAmount !== undefined) (existing as any).rtnAmount = ordData.rtnAmount;
+        if (ordData.deliveryRemarks !== undefined) (existing as any).deliveryRemarks = ordData.deliveryRemarks;
+
+        // Update Party outstanding balance with difference
+        let party = store.parties.find(p => p.id === existing.partyId || p.name.toLowerCase() === existing.partyName.toLowerCase());
+        if (party && billDiff !== 0) {
+          party.currentOutstanding = Math.max(0, party.currentOutstanding + billDiff);
+        }
+
+        // Update loader task if present
+        const lTask = store.loaderTasks.find(t => t.orderId === existing.id || t.orderNumber === existing.orderNumber);
+        if (lTask) {
+          lTask.cartonsToLoad = existing.totalCartons;
+        }
+
+        createdOrders.push(existing);
       } else {
+        // Genuinely New Order
+        const orderNumber = ordData.orderNumber || `ORD-CAD-${store.orders.length + 101 + idx}`;
+        const invoiceNumber = ordData.invoiceNumber || `INV-2026-${store.orders.length + 101 + idx}`;
+
+        let party = store.parties.find(p => 
+          (ordData.partyId && p.id === ordData.partyId) || 
+          p.name.toLowerCase() === (ordData.partyName || '').toLowerCase()
+        );
+
+        if (!party) {
+          party = {
+            id: `pty-imp-${Date.now()}-${idx}`,
+            code: `PTY-${store.parties.length + 101}`,
+            name: ordData.partyName || `Retail Customer ${idx + 1}`,
+            ownerName: ordData.partyName || 'Proprietor',
+            shopAddress: ordData.partyAddress || 'Shop No. 4, Market Road, Mumbai',
+            area: ordData.partyArea || 'Mumbai Zone',
+            pincode: '400093',
+            mobileNumber: ordData.partyMobile || `98200${Math.floor(10000 + Math.random() * 90000)}`,
+            gstNumber: ordData.partyGst || '27AABCC1234F1Z5',
+            creditLimit: 50000,
+            openingBalance: 0,
+            currentOutstanding: totalBill,
+            totalOrdersCount: 1,
+            latitude: 19.1136 + (Math.random() - 0.5) * 0.04,
+            longitude: 72.8697 + (Math.random() - 0.5) * 0.04,
+            lastOrderDate: ordData.orderDate || new Date().toISOString().split('T')[0]
+          };
+          store.parties.push(party);
+        } else {
+          party.currentOutstanding += totalBill;
+          party.lastOrderDate = ordData.orderDate || new Date().toISOString().split('T')[0];
+          party.totalOrdersCount = (party.totalOrdersCount || 0) + 1;
+        }
+
+        const newOrder: Order = {
+          id: `ord-imp-${Date.now()}-${idx}`,
+          orderNumber,
+          invoiceNumber,
+          partyId: party ? party.id : (ordData.partyId || `pty-custom-${idx}`),
+          partyName: party ? party.name : (ordData.partyName || 'Retail Customer'),
+          partyAddress: party ? party.shopAddress : (ordData.partyAddress || 'Mumbai'),
+          partyArea: party ? party.area : (ordData.partyArea || 'Mumbai'),
+          partyMobile: party ? party.mobileNumber : (ordData.partyMobile || '9820000000'),
+          partyGst: party ? party.gstNumber : (ordData.partyGst || '27AABCC1234F1Z5'),
+          partyLat: party ? party.latitude : 19.2812,
+          partyLng: party ? party.longitude : 72.8561,
+          items: ordData.items && ordData.items.length > 0 ? ordData.items : [
+            {
+              productId: 'cad-1',
+              productCode: 'CAD-DM-01',
+              productName: ordData.productName || 'Cadbury Dairy Milk 13.2g',
+              category: 'Cadbury Dairy Milk',
+              cartons: totalCartons || 5,
+              units: (totalCartons || 5) * 240,
+              ratePerCarton: Math.round(totalBill / (totalCartons || 1)),
+              discountPercent: 0,
+              gstPercent: 18,
+              totalAmount: totalBill
+            }
+          ],
+          totalCartons,
+          subtotal: ordData.subtotal ? Number(ordData.subtotal) : Math.round(totalBill / 1.18),
+          discountAmount: Number(ordData.discountAmount) || 0,
+          gstAmount: ordData.gstAmount ? Number(ordData.gstAmount) : Math.round(totalBill - (totalBill / 1.18)),
+          totalBill,
+          orderDate: ordData.orderDate || new Date().toISOString().split('T')[0],
+          deliveryDate: ordData.deliveryDate || new Date().toISOString().split('T')[0],
+          stage: GoodsStage.WAREHOUSE,
+          loadingStatus: 'Loaded',
+          cartonsLoaded: totalCartons,
+          cartonsDifference: 0,
+          deliveryStatus: (ordData.deliveryStatus || 'Pending') as any,
+          deliverySequence: store.orders.length + 1,
+          paymentStatus: (ordData.paymentStatus || 'Pending') as any,
+          paidAmount: ordData.paidAmount || 0,
+          pendingAmount: ordData.pendingAmount !== undefined ? ordData.pendingAmount : totalBill,
+          vehicleNumber: ordData.vehicleNumber || 'V1',
+          driverName: ordData.driverName || 'Santosh Yadav',
+          loaderName: ordData.loaderName || 'subham (LDR)',
+          cashierName: ordData.cashierName || ordData.deliveryBoyName || 'tejas (Cashier)',
+          deliveryBoyName: ordData.cashierName || ordData.deliveryBoyName || 'tejas (Cashier)',
+          billType: ordData.billType || (ordData.paymentMode === 'CREDIT' ? 'CREDIT' : 'CASH'),
+          loadNumber: ordData.loadNumber || '193',
+          salesmanCode: ordData.salesmanCode || ordData.sman || 'KR101'
+        };
+
+        // Loader Task
+        const loaderTask: LoaderTask = {
+          id: `lt-imp-${Date.now()}-${idx}`,
+          orderId: newOrder.id,
+          orderNumber: newOrder.orderNumber,
+          partyName: newOrder.partyName,
+          loaderName: newOrder.loaderName || 'Ramesh Kumar',
+          employeeId: 'LDR-001',
+          vehicleNumber: newOrder.vehicleNumber || 'MH 02 EK 4589',
+          loadingDate: newOrder.orderDate,
+          cartonsToLoad: newOrder.totalCartons,
+          cartonsLoaded: newOrder.totalCartons,
+          cartonsDifference: 0,
+          itemsChecklist: newOrder.items.map(it => ({
+            productName: it.productName,
+            ordered: it.cartons,
+            loaded: it.cartons,
+            difference: 0
+          })),
+          status: 'Loaded',
+          notes: 'Bulk Imported Order',
+          updatedAt: new Date().toISOString()
+        };
+        store.loaderTasks.push(loaderTask);
+
+        // Ledger Debit Entry
+        const ledgerEntry: PaymentTransaction = {
+          id: `pay-imp-${Date.now()}-${idx}`,
+          partyId: newOrder.partyId,
+          partyName: newOrder.partyName,
+          orderId: newOrder.id,
+          orderNumber: newOrder.orderNumber,
+          date: newOrder.orderDate,
+          type: 'INVOICE',
+          paymentMethod: 'Credit',
+          referenceNo: newOrder.invoiceNumber,
+          debitAmount: newOrder.totalBill,
+          creditAmount: 0,
+          runningBalance: party ? party.currentOutstanding : newOrder.totalBill,
+          collectedBy: 'Bill Import Desk',
+          notes: `Imported Tax Invoice (${newOrder.totalCartons} Box)`
+        };
+        store.payments.push(ledgerEntry);
+
         store.orders.unshift(newOrder);
         createdOrders.push(newOrder);
       }
+    });
     });
 
     saveStore();

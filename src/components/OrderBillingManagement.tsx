@@ -1258,7 +1258,7 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
     }
   };
 
-  // Helper to get active trip orders for current selected load & vehicle
+  // Helper to get active trip orders for current selected load & vehicle (Deduplicated)
   const getActiveTripOrders = (loadNo = selectedTripLoadNo, veh = selectedTripVehicle) => {
     let matching = orders.filter(o => {
       const matchLoad = loadNo === 'ALL' || String(o.loadNumber || '').trim() === String(loadNo).trim();
@@ -1273,7 +1273,19 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
       });
       if (matching.length === 0) matching = importedEveningOrders;
     }
-    return matching;
+
+    // Deduplicate by clean bill number or party to prevent ANY duplicate orders
+    const cleanStr = (s: any) => String(s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const seen = new Set<string>();
+    const deduplicated: Order[] = [];
+    matching.forEach(ord => {
+      const bKey = cleanStr(ord.orderNumber) || cleanStr(ord.invoiceNumber) || ord.id || cleanStr(ord.partyName);
+      if (!seen.has(bKey)) {
+        seen.add(bKey);
+        deduplicated.push(ord);
+      }
+    });
+    return deduplicated;
   };
 
   // Export Trip Dispatch & Loading Sheet to Excel (.xlsx)
@@ -2424,6 +2436,8 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
         let detectedVanNo = '';
         let detectedDate = '';
         let totalDispatchedFromFile = 0;
+        let updatedCount = 0;
+        let newCount = 0;
         let updatedBillsState = { ...settlementBillsState };
         let parsedCash = 0;
         let parsedCredit = 0;
@@ -2621,55 +2635,98 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
                 };
               }
 
-              newlyCreatedOrders.push({
-                id: `ord-morn-${Date.now()}-${r}`,
-                orderNumber: billKey,
-                invoiceNumber: `INV-${billKey.replace(/\D/g, '') || r}`,
-                partyId: partyCode || `pty-morn-${r}`,
-                partyName: cleanPartyName,
-                partyAddress: 'Market, Mumbai',
-                partyArea: 'Mumbai',
-                partyMobile: '9820000000',
-                partyGst: '27AABCC1234F1Z5',
-                partyLat: 19.1136,
-                partyLng: 72.8697,
-                items: [
-                  {
-                    productId: 'cad-1',
-                    productCode: 'CAD-DM-01',
-                    productName: 'Cadbury Assorted',
-                    category: (CadburyProductCategory?.DAIRY_MILK || 'Cadbury Dairy Milk') as any,
-                    cartons: orderCartons,
-                    units: orderCartons * 240,
-                    ratePerCarton: Math.round(totalBillAmt / orderCartons),
-                    discountPercent: 0,
-                    gstPercent: 18,
-                    totalAmount: totalBillAmt
-                  }
-                ],
-                totalCartons: orderCartons,
-                subtotal: Math.round(totalBillAmt / 1.18),
-                discountAmount: 0,
-                gstAmount: Math.round(totalBillAmt - (totalBillAmt / 1.18)),
-                totalBill: totalBillAmt,
-                orderDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
-                deliveryDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
-                stage: stageStatus,
-                loadingStatus: 'Loaded',
-                cartonsLoaded: orderCartons,
-                deliveryStatus: (rowHasEvening ? deliveryStatus : 'Pending') as any,
-                deliverySequence: r,
-                paymentStatus: rowHasEvening ? (isSignBill ? 'Pending' : (rowRtn > 0 ? 'Partial' : 'Paid')) : 'Pending',
-                paidAmount: rowHasEvening ? paidAmt : 0,
-                pendingAmount: rowHasEvening ? (isSignBill ? totalBillAmt : Math.max(0, totalBillAmt - paidAmt - rowRtn)) : totalBillAmt,
-                vehicleNumber: detectedVanNo || tripEditVan || 'V1',
-                driverName: tripEditDriver || 'Santosh Yadav',
-                loaderName: tripEditLoader || 'subham (LDR)',
-                cashierName: tripEditCashier || 'tejas (Cashier)',
-                billType: isSignBill ? 'CREDIT' : 'CASH',
-                loadNumber: detectedLoadNo || selectedTripLoadNo || '193',
-                deliveryRemarks: remStr || (rowHasEvening ? '' : 'Morning Dispatch')
+              const cleanStr = (s: any) => String(s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+              const cBillKey = cleanStr(billKey);
+              const cParty = cleanStr(cleanPartyName);
+              const currentLoad = detectedLoadNo || selectedTripLoadNo || '193';
+
+              // Check if order already exists in current orders (Crection / No Duplicates)
+              let matchedExisting = orders.find(o => {
+                const oNo = cleanStr(o.orderNumber);
+                const oInv = cleanStr(o.invoiceNumber);
+                const oPty = cleanStr(o.partyName);
+                const oLoad = cleanStr(o.loadNumber);
+
+                const sameBill = (oNo && cBillKey && (oNo === cBillKey || oNo.endsWith(cBillKey) || cBillKey.endsWith(oNo))) ||
+                                 (oInv && cBillKey && (oInv === cBillKey || oInv.endsWith(cBillKey) || cBillKey.endsWith(oInv)));
+                const sameParty = oPty && cParty && (oPty === cParty || oPty.includes(cParty) || cParty.includes(oPty));
+                const sameLoad = !oLoad || !currentLoad || oLoad === cleanStr(currentLoad);
+
+                return sameBill || (sameLoad && sameParty);
               });
+
+              if (matchedExisting) {
+                // Update in-place
+                matchedExisting.totalBill = totalBillAmt;
+                matchedExisting.subtotal = Math.round(totalBillAmt / 1.18);
+                matchedExisting.gstAmount = Math.round(totalBillAmt - (totalBillAmt / 1.18));
+                matchedExisting.totalCartons = orderCartons;
+                if (rowHasEvening) {
+                  matchedExisting.paidAmount = paidAmt;
+                  matchedExisting.pendingAmount = isSignBill ? totalBillAmt : Math.max(0, totalBillAmt - paidAmt - rowRtn);
+                  matchedExisting.deliveryStatus = deliveryStatus as any;
+                  matchedExisting.paymentStatus = (isSignBill ? 'Pending' : (rowRtn > 0 ? 'Partial' : 'Paid')) as any;
+                  matchedExisting.paymentMode = paymentMode as any;
+                  (matchedExisting as any).cashAmount = rowCash;
+                  (matchedExisting as any).chequeAmount = rowCheque;
+                  (matchedExisting as any).upiAmount = rowUpi;
+                  (matchedExisting as any).rtnAmount = rowRtn;
+                  (matchedExisting as any).deliveryRemarks = remStr || '';
+                }
+                if (detectedLoadNo) matchedExisting.loadNumber = detectedLoadNo;
+                if (detectedVanNo) matchedExisting.vehicleNumber = detectedVanNo;
+                newlyCreatedOrders.push(matchedExisting);
+              } else {
+                newlyCreatedOrders.push({
+                  id: `ord-morn-${Date.now()}-${r}`,
+                  orderNumber: billKey,
+                  invoiceNumber: `INV-${billKey.replace(/\D/g, '') || r}`,
+                  partyId: partyCode || `pty-morn-${r}`,
+                  partyName: cleanPartyName,
+                  partyAddress: 'Market, Mumbai',
+                  partyArea: 'Mumbai',
+                  partyMobile: '9820000000',
+                  partyGst: '27AABCC1234F1Z5',
+                  partyLat: 19.1136,
+                  partyLng: 72.8697,
+                  items: [
+                    {
+                      productId: 'cad-1',
+                      productCode: 'CAD-DM-01',
+                      productName: 'Cadbury Assorted',
+                      category: (CadburyProductCategory?.DAIRY_MILK || 'Cadbury Dairy Milk') as any,
+                      cartons: orderCartons,
+                      units: orderCartons * 240,
+                      ratePerCarton: Math.round(totalBillAmt / orderCartons),
+                      discountPercent: 0,
+                      gstPercent: 18,
+                      totalAmount: totalBillAmt
+                    }
+                  ],
+                  totalCartons: orderCartons,
+                  subtotal: Math.round(totalBillAmt / 1.18),
+                  discountAmount: 0,
+                  gstAmount: Math.round(totalBillAmt - (totalBillAmt / 1.18)),
+                  totalBill: totalBillAmt,
+                  orderDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
+                  deliveryDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
+                  stage: stageStatus,
+                  loadingStatus: 'Loaded',
+                  cartonsLoaded: orderCartons,
+                  deliveryStatus: (rowHasEvening ? deliveryStatus : 'Pending') as any,
+                  deliverySequence: r,
+                  paymentStatus: rowHasEvening ? (isSignBill ? 'Pending' : (rowRtn > 0 ? 'Partial' : 'Paid')) : 'Pending',
+                  paidAmount: rowHasEvening ? paidAmt : 0,
+                  pendingAmount: rowHasEvening ? (isSignBill ? totalBillAmt : Math.max(0, totalBillAmt - paidAmt - rowRtn)) : totalBillAmt,
+                  vehicleNumber: detectedVanNo || tripEditVan || 'V1',
+                  driverName: tripEditDriver || 'Santosh Yadav',
+                  loaderName: tripEditLoader || 'subham (LDR)',
+                  cashierName: tripEditCashier || 'tejas (Cashier)',
+                  billType: isSignBill ? 'CREDIT' : 'CASH',
+                  loadNumber: detectedLoadNo || selectedTripLoadNo || '193',
+                  deliveryRemarks: remStr || (rowHasEvening ? '' : 'Morning Dispatch')
+                });
+              }
             }
           }
         }
@@ -2784,6 +2841,8 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
         let detectedVanNo = '';
         let detectedDate = '';
         let totalDispatchedFromFile = 0;
+        let updatedCount = 0;
+        let newCount = 0;
 
         for (const sheetName of workbook.SheetNames) {
           const worksheet = workbook.Sheets[sheetName];
@@ -2946,9 +3005,108 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
               totalDispatchedFromFile += totalBillAmt;
               const billKey = billRaw || `BILL-${r}`;
 
-              updatedBillsState[billKey] = {
-                orderId: billKey,
-                orderNumber: billKey,
+              const cleanStr = (s: any) => String(s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+              const cBillKey = cleanStr(billKey);
+              const cParty = cleanStr(cleanPartyName);
+              const currentLoad = detectedLoadNo || selectedTripLoadNo || '193';
+
+              // Check if order already exists in current orders (Crection / No Duplicates)
+              let matchedExisting = orders.find(o => {
+                const oNo = cleanStr(o.orderNumber);
+                const oInv = cleanStr(o.invoiceNumber);
+                const oPty = cleanStr(o.partyName);
+                const oLoad = cleanStr(o.loadNumber);
+
+                const sameBill = (oNo && cBillKey && (oNo === cBillKey || oNo.endsWith(cBillKey) || cBillKey.endsWith(oNo))) ||
+                                 (oInv && cBillKey && (oInv === cBillKey || oInv.endsWith(cBillKey) || cBillKey.endsWith(oInv)));
+                const sameParty = oPty && cParty && (oPty === cParty || oPty.includes(cParty) || cParty.includes(oPty));
+                const sameLoad = !oLoad || !currentLoad || oLoad === cleanStr(currentLoad);
+
+                return sameBill || (sameLoad && sameParty);
+              });
+
+              const orderCartons = Math.max(1, Math.round(totalBillAmt / 2500));
+              let finalOrderObj: Order;
+
+              if (matchedExisting) {
+                // UPDATE IN-PLACE (CRECTION / NO DUPLICATES)
+                updatedCount++;
+                matchedExisting.totalBill = totalBillAmt;
+                matchedExisting.subtotal = Math.round(totalBillAmt / 1.18);
+                matchedExisting.gstAmount = Math.round(totalBillAmt - (totalBillAmt / 1.18));
+                matchedExisting.totalCartons = orderCartons;
+                matchedExisting.paidAmount = paidAmt;
+                matchedExisting.pendingAmount = isSignBill ? totalBillAmt : Math.max(0, totalBillAmt - paidAmt - rowRtn);
+                matchedExisting.deliveryStatus = deliveryStatus as any;
+                matchedExisting.paymentStatus = (isSignBill ? 'Pending' : (rowRtn > 0 ? 'Partial' : 'Paid')) as any;
+                matchedExisting.paymentMode = paymentMode as any;
+                (matchedExisting as any).cashAmount = rowCash;
+                (matchedExisting as any).chequeAmount = rowCheque;
+                (matchedExisting as any).upiAmount = rowUpi;
+                (matchedExisting as any).rtnAmount = rowRtn;
+                (matchedExisting as any).deliveryRemarks = remStr || '';
+                matchedExisting.billType = isSignBill ? 'CREDIT' : 'CASH';
+                if (detectedLoadNo) matchedExisting.loadNumber = detectedLoadNo;
+                if (detectedVanNo) matchedExisting.vehicleNumber = detectedVanNo;
+                if (tripEditDriver) matchedExisting.driverName = tripEditDriver;
+
+                finalOrderObj = matchedExisting;
+              } else {
+                newCount++;
+                finalOrderObj = {
+                  id: `ord-eve-${Date.now()}-${r}`,
+                  orderNumber: billKey,
+                  invoiceNumber: `INV-${billKey.replace(/\D/g, '') || r}`,
+                  partyId: partyCode || `pty-eve-${r}`,
+                  partyName: cleanPartyName,
+                  partyAddress: 'Market, Mumbai',
+                  partyArea: 'Mumbai',
+                  partyMobile: '9820000000',
+                  partyGst: '27AABCC1234F1Z5',
+                  partyLat: 19.1136,
+                  partyLng: 72.8697,
+                  items: [
+                    {
+                      productId: 'cad-1',
+                      productCode: 'CAD-DM-01',
+                      productName: 'Cadbury Assorted',
+                      category: (CadburyProductCategory?.DAIRY_MILK || 'Cadbury Dairy Milk') as any,
+                      cartons: orderCartons,
+                      units: orderCartons * 240,
+                      ratePerCarton: Math.round(totalBillAmt / orderCartons),
+                      discountPercent: 0,
+                      gstPercent: 18,
+                      totalAmount: totalBillAmt
+                    }
+                  ],
+                  totalCartons: orderCartons,
+                  subtotal: Math.round(totalBillAmt / 1.18),
+                  discountAmount: 0,
+                  gstAmount: Math.round(totalBillAmt - (totalBillAmt / 1.18)),
+                  totalBill: totalBillAmt,
+                  orderDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
+                  deliveryDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
+                  stage: (typeof GoodsStage !== 'undefined' && (GoodsStage as any)?.DELIVERED) ? (GoodsStage as any).DELIVERED : 'Delivered',
+                  loadingStatus: 'Loaded',
+                  cartonsLoaded: orderCartons,
+                  deliveryStatus: deliveryStatus as any,
+                  deliverySequence: r,
+                  paymentStatus: isSignBill ? 'Pending' : (rowRtn > 0 ? 'Partial' : 'Paid'),
+                  paidAmount: paidAmt,
+                  pendingAmount: isSignBill ? totalBillAmt : Math.max(0, totalBillAmt - paidAmt - rowRtn),
+                  vehicleNumber: detectedVanNo || tripEditVan || 'V1',
+                  driverName: tripEditDriver || 'Santosh Yadav',
+                  loaderName: tripEditLoader || 'subham (LDR)',
+                  cashierName: tripEditCashier || 'tejas (Cashier)',
+                  billType: isSignBill ? 'CREDIT' : 'CASH',
+                  loadNumber: detectedLoadNo || selectedTripLoadNo || '193',
+                  deliveryRemarks: remStr || ''
+                };
+              }
+
+              const billStateRecord = {
+                orderId: finalOrderObj.id,
+                orderNumber: finalOrderObj.orderNumber,
                 partyName: cleanPartyName,
                 partyCode,
                 totalBill: totalBillAmt,
@@ -2963,57 +3121,12 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
                 notes: remStr || (isCancel ? 'CANCEL' : isSignBill ? 'SIGN BILL' : '')
               };
 
-              // Prepare created order object
-              const orderCartons = Math.max(1, Math.round(totalBillAmt / 2500));
-              newlyCreatedOrders.push({
-                id: `ord-eve-${Date.now()}-${r}`,
-                orderNumber: billKey,
-                invoiceNumber: `INV-${billKey.replace(/\D/g, '') || r}`,
-                partyId: partyCode || `pty-eve-${r}`,
-                partyName: cleanPartyName,
-                partyAddress: 'Market, Mumbai',
-                partyArea: 'Mumbai',
-                partyMobile: '9820000000',
-                partyGst: '27AABCC1234F1Z5',
-                partyLat: 19.1136,
-                partyLng: 72.8697,
-                items: [
-                  {
-                    productId: 'cad-1',
-                    productCode: 'CAD-DM-01',
-                    productName: 'Cadbury Assorted',
-                    category: (CadburyProductCategory?.DAIRY_MILK || 'Cadbury Dairy Milk') as any,
-                    cartons: orderCartons,
-                    units: orderCartons * 240,
-                    ratePerCarton: Math.round(totalBillAmt / orderCartons),
-                    discountPercent: 0,
-                    gstPercent: 18,
-                    totalAmount: totalBillAmt
-                  }
-                ],
-                totalCartons: orderCartons,
-                subtotal: Math.round(totalBillAmt / 1.18),
-                discountAmount: 0,
-                gstAmount: Math.round(totalBillAmt - (totalBillAmt / 1.18)),
-                totalBill: totalBillAmt,
-                orderDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
-                deliveryDate: billDateRaw || detectedDate || new Date().toISOString().split('T')[0],
-                stage: (typeof GoodsStage !== 'undefined' && (GoodsStage as any)?.DELIVERED) ? (GoodsStage as any).DELIVERED : 'Delivered',
-                loadingStatus: 'Loaded',
-                cartonsLoaded: orderCartons,
-                deliveryStatus: deliveryStatus as any,
-                deliverySequence: r,
-                paymentStatus: isSignBill ? 'Pending' : (rowRtn > 0 ? 'Partial' : 'Paid'),
-                paidAmount: paidAmt,
-                pendingAmount: isSignBill ? totalBillAmt : Math.max(0, totalBillAmt - paidAmt - rowRtn),
-                vehicleNumber: detectedVanNo || tripEditVan || 'V1',
-                driverName: tripEditDriver || 'Santosh Yadav',
-                loaderName: tripEditLoader || 'Loader Ramesh',
-                cashierName: tripEditCashier || 'Cashier Suresh',
-                billType: isSignBill ? 'CREDIT' : 'CASH',
-                loadNumber: detectedLoadNo || selectedTripLoadNo || '193',
-                deliveryRemarks: remStr || ''
-              });
+              updatedBillsState[billKey] = billStateRecord;
+              if (finalOrderObj.orderNumber && finalOrderObj.orderNumber !== billKey) {
+                updatedBillsState[finalOrderObj.orderNumber] = billStateRecord;
+              }
+
+              newlyCreatedOrders.push(finalOrderObj);
             }
           }
         }
@@ -3061,7 +3174,7 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
         const msg = `✅ Excel फ़ाइल "${file.name}" सफलतापूर्वक इम्पोर्ट व कैलकुलेट हो गई!\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
           `• लोड नंबर (Load No): #${detectedLoadNo || '193'} | वैन: ${detectedVanNo || 'V1'}\n` +
-          `• कुल बिल (Total Bills): ${newlyCreatedOrders.length} बिल\n` +
+          `• कुल बिल (Total Bills): ${newlyCreatedOrders.length} बिल (${updatedCount} बिल सही/सुधारे गए, ${newCount} नए बिल)\n` +
           `• कुल डिस्पैच रकम: ₹${totalDispatchedFromFile.toLocaleString('en-IN')}\n` +
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
           `1. रोकड़ (CASH): ₹${parsedCash.toLocaleString('en-IN')}\n` +
@@ -6430,7 +6543,19 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                     matched = importedEveningOrders.filter(o => String(o.loadNumber || '').trim() === String(currentLoad).trim());
                   }
                 }
-                return matched;
+
+                // Deduplicate by clean bill number or party to prevent ANY duplicate rows
+                const cleanStr = (s: any) => String(s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                const seen = new Set<string>();
+                const deduplicated: Order[] = [];
+                matched.forEach(ord => {
+                  const bKey = cleanStr(ord.orderNumber) || cleanStr(ord.invoiceNumber) || ord.id || cleanStr(ord.partyName);
+                  if (!seen.has(bKey)) {
+                    seen.add(bKey);
+                    deduplicated.push(ord);
+                  }
+                });
+                return deduplicated;
               })();
 
               const totalTripBill = tripOrders.reduce((s, o) => s + (o.totalBill || 0), 0);
