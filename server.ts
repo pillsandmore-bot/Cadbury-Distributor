@@ -758,7 +758,6 @@ async function startServer() {
         createdOrders.push(newOrder);
       }
     });
-    });
 
     saveStore();
     io.emit("order_updated", store.orders);
