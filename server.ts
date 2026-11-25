@@ -828,7 +828,7 @@ async function startServer() {
 
   // Batch update crew for multiple orders
   app.put("/api/cadbury/orders/batch-crew", (req, res) => {
-    const { orderIds, vehicleNumber, driverName, loaderName, cashierName, loadNumber, cartonsLoaded, driverLocation, loaderLocation, cashierLocation } = req.body;
+    const { orderIds, vehicleNumber, driverName, loaderName, cashierName, loadNumber, cartonsLoaded, bigCratesLoaded, miniCratesLoaded, futeBoxesLoaded, driverLocation, loaderLocation, cashierLocation } = req.body;
     if (!Array.isArray(orderIds) || orderIds.length === 0) {
       return res.status(400).json({ error: "orderIds array is required" });
     }
@@ -845,6 +845,9 @@ async function startServer() {
         }
         if (loadNumber) order.loadNumber = loadNumber;
         if (cartonsLoaded !== undefined) order.cartonsLoaded = Number(cartonsLoaded);
+        if (bigCratesLoaded !== undefined) (order as any).bigCratesLoaded = Number(bigCratesLoaded);
+        if (miniCratesLoaded !== undefined) (order as any).miniCratesLoaded = Number(miniCratesLoaded);
+        if (futeBoxesLoaded !== undefined) (order as any).futeBoxesLoaded = Number(futeBoxesLoaded);
         if (driverLocation) (order as any).driverLocation = driverLocation;
         if (loaderLocation) (order as any).loaderLocation = loaderLocation;
         if (cashierLocation) (order as any).cashierLocation = cashierLocation;
@@ -920,6 +923,15 @@ async function startServer() {
       boxesDispatched: Number(settlementData.boxesDispatched) || 0,
       boxesDelivered: Number(settlementData.boxesDelivered) || 0,
       boxesReturned: Number(settlementData.boxesReturned) || 0,
+      bigCratesDispatched: Number(settlementData.bigCratesDispatched) || 0,
+      bigCratesReturned: Number(settlementData.bigCratesReturned) || 0,
+      bigCratesMissing: Number(settlementData.bigCratesMissing) || 0,
+      miniCratesDispatched: Number(settlementData.miniCratesDispatched) || 0,
+      miniCratesReturned: Number(settlementData.miniCratesReturned) || 0,
+      miniCratesMissing: Number(settlementData.miniCratesMissing) || 0,
+      futeBoxesDispatched: Number(settlementData.futeBoxesDispatched) || 0,
+      futeBoxesReturned: Number(settlementData.futeBoxesReturned) || 0,
+      futeBoxesMissing: Number(settlementData.futeBoxesMissing) || 0,
       totalTripDispatched: Number(settlementData.totalTripDispatched) || 0,
       actualCashCollected: Number(settlementData.actualCashCollected) || 0,
       actualChequeCollected: Number(settlementData.actualChequeCollected) || 0,

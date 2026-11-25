@@ -59,6 +59,10 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
   const [tripEditLoader, setTripEditLoader] = useState<string>('subham (LDR)');
   const [tripEditCashier, setTripEditCashier] = useState<string>('tejas (Cashier)');
   const [tripEditBoxesLoaded, setTripEditBoxesLoaded] = useState<string>('54');
+  // Morning Containers Loaded (Big Crate, Mini Crate, Fute Box)
+  const [tripBigCratesLoaded, setTripBigCratesLoaded] = useState<string>('12');
+  const [tripMiniCratesLoaded, setTripMiniCratesLoaded] = useState<string>('8');
+  const [tripFuteBoxesLoaded, setTripFuteBoxesLoaded] = useState<string>('2');
   const [tripEditDriverLocation, setTripEditDriverLocation] = useState<string>('Bhandup West Beat / Station Road');
   const [tripEditLoaderLocation, setTripEditLoaderLocation] = useState<string>('Central Warehouse Bay 1');
   const [tripEditCashierLocation, setTripEditCashierLocation] = useState<string>('Village Road Collection Counter');
@@ -273,6 +277,10 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
   const [settlementCreditAllowed, setSettlementCreditAllowed] = useState<string>('91722');
   const [settlementBoxesDelivered, setSettlementBoxesDelivered] = useState<string>('54');
   const [settlementBoxesReturned, setSettlementBoxesReturned] = useState<string>('0');
+  // Evening Settlement Containers Returned (Big Crate, Mini Crate, Fute Box)
+  const [settlementBigCratesReturned, setSettlementBigCratesReturned] = useState<string>('12');
+  const [settlementMiniCratesReturned, setSettlementMiniCratesReturned] = useState<string>('8');
+  const [settlementFuteBoxesReturned, setSettlementFuteBoxesReturned] = useState<string>('2');
   const [settlementReturnAmount, setSettlementReturnAmount] = useState<string>('0');
   const [settlementRemarks, setSettlementRemarks] = useState<string>('');
   const [chequesList, setChequesList] = useState<Array<{ id: string; chequeNo: string; bankName: string; partyName: string; amount: number }>>([]);
@@ -1153,6 +1161,14 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
     setSettlementBoxesReturned('0');
     setSettlementReturnAmount('0');
 
+    const sampleOrd = matching[0] as any;
+    if (sampleOrd?.bigCratesLoaded !== undefined) setTripBigCratesLoaded(String(sampleOrd.bigCratesLoaded));
+    if (sampleOrd?.miniCratesLoaded !== undefined) setTripMiniCratesLoaded(String(sampleOrd.miniCratesLoaded));
+    if (sampleOrd?.futeBoxesLoaded !== undefined) setTripFuteBoxesLoaded(String(sampleOrd.futeBoxesLoaded));
+    setSettlementBigCratesReturned(String(sampleOrd?.bigCratesLoaded !== undefined ? sampleOrd.bigCratesLoaded : tripBigCratesLoaded || '12'));
+    setSettlementMiniCratesReturned(String(sampleOrd?.miniCratesLoaded !== undefined ? sampleOrd.miniCratesLoaded : tripMiniCratesLoaded || '8'));
+    setSettlementFuteBoxesReturned(String(sampleOrd?.futeBoxesLoaded !== undefined ? sampleOrd.futeBoxesLoaded : tripFuteBoxesLoaded || '2'));
+
     // Initialize per-bill statuses
     const initialBillsState: any = {};
     matching.forEach(ord => {
@@ -1205,6 +1221,9 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
           cashierName: tripEditCashier,
           loadNumber: selectedTripLoadNo === 'ALL' ? '188' : selectedTripLoadNo,
           cartonsLoaded: tripEditBoxesLoaded ? Number(tripEditBoxesLoaded) : undefined,
+          bigCratesLoaded: tripBigCratesLoaded ? Number(tripBigCratesLoaded) : 0,
+          miniCratesLoaded: tripMiniCratesLoaded ? Number(tripMiniCratesLoaded) : 0,
+          futeBoxesLoaded: tripFuteBoxesLoaded ? Number(tripFuteBoxesLoaded) : 0,
           driverLocation: tripEditDriverLocation,
           loaderLocation: tripEditLoaderLocation,
           cashierLocation: tripEditCashierLocation
@@ -1221,6 +1240,9 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
         ord.cashierName = tripEditCashier;
         ord.deliveryBoyName = tripEditCashier;
         if (tripEditBoxesLoaded) ord.cartonsLoaded = Number(tripEditBoxesLoaded);
+        (ord as any).bigCratesLoaded = Number(tripBigCratesLoaded) || 0;
+        (ord as any).miniCratesLoaded = Number(tripMiniCratesLoaded) || 0;
+        (ord as any).futeBoxesLoaded = Number(tripFuteBoxesLoaded) || 0;
         (ord as any).driverLocation = tripEditDriverLocation;
         (ord as any).loaderLocation = tripEditLoaderLocation;
         (ord as any).cashierLocation = tripEditCashierLocation;
@@ -1249,7 +1271,7 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
       if (tripEditLoader) handleSaveCrewMasterItem('loaders', tripEditLoader, tripEditLoaderLocation);
       if (tripEditCashier) handleSaveCrewMasterItem('cashiers', tripEditCashier, tripEditCashierLocation);
 
-      setTripCrewSavedMsg(`✅ Van "${tripEditVan}" par Driver "${tripEditDriver}", Loader "${tripEditLoader}", Cashier "${tripEditCashier}" aur ${tripEditBoxesLoaded || '54'} Boxes jud gaye! (${matching.length} बिल अपडेट)`);
+      setTripCrewSavedMsg(`✅ Van "${tripEditVan}" par Driver "${tripEditDriver}", Loader "${tripEditLoader}", Cashier "${tripEditCashier}", ${tripEditBoxesLoaded || '54'} Boxes, ${tripBigCratesLoaded || '0'} Big Crates, ${tripMiniCratesLoaded || '0'} Mini Crates व ${tripFuteBoxesLoaded || '0'} फूटा बॉक्स जुड़ गए! (${matching.length} बिल अपडेट)`);
       setTimeout(() => setTripCrewSavedMsg(''), 4500);
     } catch (err: any) {
       alert('Trip crew update error: ' + (err.message || 'Unknown error'));
@@ -1929,6 +1951,15 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
         boxesDispatched: Number(tripEditBoxesLoaded) || tripOrders.reduce((s, o) => s + (o.totalCartons || 0), 0),
         boxesDelivered: Number(settlementBoxesDelivered) || 0,
         boxesReturned: Number(settlementBoxesReturned) || 0,
+        bigCratesDispatched: Number(tripBigCratesLoaded) || 0,
+        bigCratesReturned: Number(settlementBigCratesReturned) || 0,
+        bigCratesMissing: Math.max(0, (Number(tripBigCratesLoaded) || 0) - (Number(settlementBigCratesReturned) || 0)),
+        miniCratesDispatched: Number(tripMiniCratesLoaded) || 0,
+        miniCratesReturned: Number(settlementMiniCratesReturned) || 0,
+        miniCratesMissing: Math.max(0, (Number(tripMiniCratesLoaded) || 0) - (Number(settlementMiniCratesReturned) || 0)),
+        futeBoxesDispatched: Number(tripFuteBoxesLoaded) || 0,
+        futeBoxesReturned: Number(settlementFuteBoxesReturned) || 0,
+        futeBoxesMissing: (Number(tripFuteBoxesLoaded) || 0) - (Number(settlementFuteBoxesReturned) || 0),
         totalTripDispatched: totalTripBill,
         actualCashCollected: cashAmt,
         actualChequeCollected: totalChequesAmount,
@@ -5840,6 +5871,140 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                       </div>
                     </div>
 
+                    {/* NEW: Crates & Damaged/Fute Boxes Dispatch Section (Big Crate, Mini Crate, Fute Box Control) */}
+                    <div className="bg-gradient-to-r from-amber-50/90 via-orange-50/80 to-yellow-50/90 p-3 rounded-2xl border-2 border-amber-300 shadow-sm space-y-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-amber-200/80 pb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-lg bg-amber-500 text-white flex items-center justify-center text-xs font-black shadow-sm">
+                            📦
+                          </span>
+                          <div>
+                            <span className="text-xs font-black text-amber-950 uppercase tracking-tight">
+                              क्रेट्स व फूटा बॉक्स लोडिंग (Big Crate, Mini Crate & Fute Box Management)
+                            </span>
+                            <span className="text-[10px] text-amber-800 block">
+                              गाड़ी पर कितने बड़े/छोटे प्लास्टिक क्रेट व फूटे बॉक्स भेजे जा रहे हैं — शाम को ठीक इतना ही हिसाब लिया जाएगा
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs font-bold">
+                          <span className="bg-amber-100 text-amber-950 px-2.5 py-0.5 rounded-full border border-amber-300 font-mono font-black">
+                            कुल क्रेट्स: {(Number(tripBigCratesLoaded) || 0) + (Number(tripMiniCratesLoaded) || 0)} Crates
+                          </span>
+                          <span className="bg-orange-100 text-orange-950 px-2 py-0.5 rounded-full border border-orange-300 font-mono font-black">
+                            फूटा बॉक्स: {tripFuteBoxesLoaded || 0} Bx
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                        {/* 1. Big Crate */}
+                        <div className="bg-white p-2.5 rounded-xl border border-amber-300 shadow-sm">
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[11px] font-black text-amber-950 flex items-center gap-1">
+                              <i className="fa-solid fa-cube text-amber-600"></i> बड़ा क्रेट (Big Crate) *
+                            </label>
+                            <span className="text-[9px] text-amber-700 font-extrabold uppercase">Large Plastic</span>
+                          </div>
+                          <div className="flex gap-1 mb-1.5">
+                            {['6', '12', '18', '24'].map(val => (
+                              <button
+                                key={val}
+                                type="button"
+                                onClick={() => setTripBigCratesLoaded(val)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-black transition-all ${
+                                  tripBigCratesLoaded === val
+                                    ? 'bg-amber-600 text-white shadow-sm'
+                                    : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200'
+                                }`}
+                              >
+                                {val}
+                              </button>
+                            ))}
+                          </div>
+                          <input
+                            type="number"
+                            min="0"
+                            value={tripBigCratesLoaded}
+                            onChange={(e) => setTripBigCratesLoaded(e.target.value)}
+                            placeholder="Big Crates Count"
+                            className="w-full px-2.5 py-1 border border-amber-300 rounded-lg font-mono font-black text-xs bg-amber-50/20 text-amber-950 focus:ring-2 focus:ring-amber-500 shadow-inner"
+                          />
+                          <span className="text-[9px] text-slate-500 mt-1 block">बड़ा चॉकलेट क्रेट (Large Red/Blue Crate)</span>
+                        </div>
+
+                        {/* 2. Mini Crate */}
+                        <div className="bg-white p-2.5 rounded-xl border border-orange-300 shadow-sm">
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[11px] font-black text-orange-950 flex items-center gap-1">
+                              <i className="fa-solid fa-box-open text-orange-600"></i> छोटा क्रेट (Mini Crate) *
+                            </label>
+                            <span className="text-[9px] text-orange-700 font-extrabold uppercase">Small Plastic</span>
+                          </div>
+                          <div className="flex gap-1 mb-1.5">
+                            {['4', '8', '12', '16'].map(val => (
+                              <button
+                                key={val}
+                                type="button"
+                                onClick={() => setTripMiniCratesLoaded(val)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-black transition-all ${
+                                  tripMiniCratesLoaded === val
+                                    ? 'bg-orange-600 text-white shadow-sm'
+                                    : 'bg-orange-50 hover:bg-orange-100 text-orange-900 border border-orange-200'
+                                }`}
+                              >
+                                {val}
+                              </button>
+                            ))}
+                          </div>
+                          <input
+                            type="number"
+                            min="0"
+                            value={tripMiniCratesLoaded}
+                            onChange={(e) => setTripMiniCratesLoaded(e.target.value)}
+                            placeholder="Mini Crates Count"
+                            className="w-full px-2.5 py-1 border border-orange-300 rounded-lg font-mono font-black text-xs bg-orange-50/20 text-orange-950 focus:ring-2 focus:ring-orange-500 shadow-inner"
+                          />
+                          <span className="text-[9px] text-slate-500 mt-1 block">छोटा चॉकलेट क्रेट (Small Mini Crate)</span>
+                        </div>
+
+                        {/* 3. Fute / Loose / Damaged Boxes */}
+                        <div className="bg-white p-2.5 rounded-xl border border-rose-300 shadow-sm">
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[11px] font-black text-rose-950 flex items-center gap-1">
+                              <i className="fa-solid fa-box-tissue text-rose-600"></i> फूटा / खुला बॉक्स (Fute Box)
+                            </label>
+                            <span className="text-[9px] text-rose-700 font-extrabold uppercase">Loose / Damage</span>
+                          </div>
+                          <div className="flex gap-1 mb-1.5">
+                            {['0', '1', '2', '4'].map(val => (
+                              <button
+                                key={val}
+                                type="button"
+                                onClick={() => setTripFuteBoxesLoaded(val)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-black transition-all ${
+                                  tripFuteBoxesLoaded === val
+                                    ? 'bg-rose-600 text-white shadow-sm'
+                                    : 'bg-rose-50 hover:bg-rose-100 text-rose-900 border border-rose-200'
+                                }`}
+                              >
+                                {val}
+                              </button>
+                            ))}
+                          </div>
+                          <input
+                            type="number"
+                            min="0"
+                            value={tripFuteBoxesLoaded}
+                            onChange={(e) => setTripFuteBoxesLoaded(e.target.value)}
+                            placeholder="Fute Boxes Count"
+                            className="w-full px-2.5 py-1 border border-rose-300 rounded-lg font-mono font-black text-xs bg-rose-50/20 text-rose-950 focus:ring-2 focus:ring-rose-500 shadow-inner"
+                          />
+                          <span className="text-[9px] text-slate-500 mt-1 block">खुला / फूटा / सैम्पल बॉक्स गिनती</span>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="flex flex-wrap items-center justify-between pt-1 gap-2">
                       <div className="text-[11px] text-slate-500 italic">
                         💡 Tip: Delivery Van, Driver, Loader, Cashier ya Boxes Loaded badal kar button dabayein — sabhi {tripOrders.length} bills aur printout par turant update ho jayega.
@@ -6020,8 +6185,9 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                                       <strong className="font-mono text-black text-xs font-black block">{activeTripVan}</strong>
                                     </div>
                                     <div>
-                                      <span className="text-[9px] text-black font-extrabold block uppercase">Boxes Loaded:</span>
+                                      <span className="text-[9px] text-black font-extrabold block uppercase">Boxes & Crates:</span>
                                       <strong className="font-mono text-black text-xs font-black block">{tripEditBoxesLoaded || totalTripCartons} Boxes</strong>
+                                      <span className="text-[8.5px] font-bold text-black block truncate">Big: {tripBigCratesLoaded || '0'} | Mini: {tripMiniCratesLoaded || '0'} | Fute: {tripFuteBoxesLoaded || '0'}</span>
                                     </div>
                                     <div>
                                       <span className="text-[9px] text-black font-extrabold block uppercase">Driver Name:</span>
@@ -6407,7 +6573,40 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                                     </div>
                                   )}
 
-                                  {/* Four Signatures Undertaking Cards */}
+                                                                     {/* NEW: Crates & Damaged/Fute Boxes Dispatch Handover Receipt Slip */}
+                                   <div className="avoid-break mt-2 p-2 bg-amber-50 border-2 border-black rounded-lg text-black text-xs">
+                                     <div className="flex items-center justify-between font-black border-b border-black pb-1 mb-1.5 text-[10px]">
+                                       <span className="uppercase flex items-center gap-1.5">
+                                         📦 क्रेट्स व बॉक्स रसीद सुपुर्दगी (CRATES & BOXES DISPATCH HANDOVER RECEIPT):
+                                       </span>
+                                       <span className="font-mono">
+                                         वैन: <strong>{activeTripVan}</strong> | लोड: <strong>#{selectedTripLoadNo === 'ALL' ? (tripOrders[0]?.loadNumber || '188') : selectedTripLoadNo}</strong>
+                                       </span>
+                                     </div>
+                                     <div className="grid grid-cols-4 gap-2 text-center text-[10px] font-bold">
+                                       <div className="bg-white p-1 rounded border border-black">
+                                         <span className="text-[8.5px] block text-slate-700 uppercase font-black">1. बड़ा क्रेट (Big Crate):</span>
+                                         <strong className="text-xs font-mono font-black text-black">{tripBigCratesLoaded || '0'} Crates</strong>
+                                       </div>
+                                       <div className="bg-white p-1 rounded border border-black">
+                                         <span className="text-[8.5px] block text-slate-700 uppercase font-black">2. छोटा क्रेट (Mini Crate):</span>
+                                         <strong className="text-xs font-mono font-black text-black">{tripMiniCratesLoaded || '0'} Crates</strong>
+                                       </div>
+                                       <div className="bg-white p-1 rounded border border-black">
+                                         <span className="text-[8.5px] block text-slate-700 uppercase font-black">3. फूटा/खुला बॉक्स (Fute Box):</span>
+                                         <strong className="text-xs font-mono font-black text-black">{tripFuteBoxesLoaded || '0'} Boxes</strong>
+                                       </div>
+                                       <div className="bg-white p-1 rounded border border-black">
+                                         <span className="text-[8.5px] block text-slate-700 uppercase font-black">4. कुल लोडेड बॉक्स (Boxes):</span>
+                                         <strong className="text-xs font-mono font-black text-black">{tripEditBoxesLoaded || totalTripCartons} Boxes</strong>
+                                       </div>
+                                     </div>
+                                     <div className="text-[8.5px] font-bold text-slate-700 mt-1 italic text-center border-t border-dashed border-black/40 pt-0.5">
+                                       * नियम: शाम को वैन वापसी पर ड्राइवर व कैशियर को ठीक इतने ही क्रेट्स (Big & Mini) व फूटे/खाली बॉक्स वेअरहाउस में जमा कराने होंगे। कम होने पर भरपाई ली जाएगी।
+                                     </div>
+                                   </div>
+
+                                   {/* Four Signatures Undertaking Cards */}
                                   <div className="avoid-break mt-2 pt-2 border-t-2 border-black text-black">
                                     <div className="text-[9px] font-black uppercase tracking-wider text-center text-slate-800 mb-1.5">
                                       वाहन रवानगी व रोकड़ सुपुर्दगी अधिकार पत्र (TRIP DISPATCH & CREW UNDERTAKING)
@@ -7162,34 +7361,142 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                           </div>
                         </div>
 
-                        {/* 3. Boxes Delivered & Returned */}
-                        <div className="lg:col-span-4 p-4 bg-white rounded-xl border border-indigo-200 shadow-sm space-y-2">
-                          <h3 className="font-bold text-xs text-indigo-950 uppercase flex items-center gap-1.5 border-b border-indigo-100 pb-2">
-                            <i className="fa-solid fa-boxes-stacked text-indigo-600"></i> 3. बॉक्स गिनती (Boxes Tally)
-                          </h3>
-                          <div className="grid grid-cols-2 gap-2">
+                        {/* 3. Crates & Boxes Tally (Missing Crate Control) */}
+                        <div className="lg:col-span-4 p-4 bg-white rounded-xl border-2 border-indigo-300 shadow-sm space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-indigo-100 pb-2 gap-1">
+                            <h3 className="font-black text-xs text-indigo-950 uppercase flex items-center gap-1.5">
+                              <i className="fa-solid fa-boxes-stacked text-indigo-600"></i> 3. क्रेट्स व बॉक्स मिलान (Crates & Boxes Missing Control)
+                            </h3>
+                            <span className="text-[10px] text-slate-500 font-bold">
+                              Van: <strong className="text-indigo-900 font-mono">{tripEditVan}</strong>
+                            </span>
+                          </div>
+
+                          {/* Containers Reconciliation Table */}
+                          <div className="border border-indigo-200 rounded-lg overflow-hidden text-xs">
+                            <table className="w-full text-left border-collapse text-[11px]">
+                              <thead className="bg-indigo-50/70 text-indigo-950 font-black text-[10px] uppercase border-b border-indigo-200">
+                                <tr>
+                                  <th className="p-1.5">कंटेनर प्रकार</th>
+                                  <th className="p-1.5 text-center">सुबह भेजा</th>
+                                  <th className="p-1.5 text-center">शाम को जमा</th>
+                                  <th className="p-1.5 text-center">अंतर / कम</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-indigo-100">
+                                <tr>
+                                  <td className="p-1.5 font-bold text-amber-950">📦 बड़ा क्रेट (Big Crate)</td>
+                                  <td className="p-1.5 text-center font-mono font-black">{tripBigCratesLoaded || '0'}</td>
+                                  <td className="p-1.5 text-center">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={settlementBigCratesReturned}
+                                      onChange={(e) => setSettlementBigCratesReturned(e.target.value)}
+                                      className="w-16 px-1.5 py-0.5 border border-amber-300 rounded font-mono font-black text-center text-xs bg-amber-50/30"
+                                    />
+                                  </td>
+                                  <td className="p-1.5 text-center font-mono font-black">
+                                    {Math.max(0, (Number(tripBigCratesLoaded) || 0) - (Number(settlementBigCratesReturned) || 0)) > 0 ? (
+                                      <span className="text-rose-600 font-black">⚠️ {Math.max(0, (Number(tripBigCratesLoaded) || 0) - (Number(settlementBigCratesReturned) || 0))} कम</span>
+                                    ) : (
+                                      <span className="text-emerald-600 font-bold">0 Ok</span>
+                                    )}
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td className="p-1.5 font-bold text-orange-950">📦 छोटा क्रेट (Mini Crate)</td>
+                                  <td className="p-1.5 text-center font-mono font-black">{tripMiniCratesLoaded || '0'}</td>
+                                  <td className="p-1.5 text-center">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={settlementMiniCratesReturned}
+                                      onChange={(e) => setSettlementMiniCratesReturned(e.target.value)}
+                                      className="w-16 px-1.5 py-0.5 border border-orange-300 rounded font-mono font-black text-center text-xs bg-orange-50/30"
+                                    />
+                                  </td>
+                                  <td className="p-1.5 text-center font-mono font-black">
+                                    {Math.max(0, (Number(tripMiniCratesLoaded) || 0) - (Number(settlementMiniCratesReturned) || 0)) > 0 ? (
+                                      <span className="text-rose-600 font-black">⚠️ {Math.max(0, (Number(tripMiniCratesLoaded) || 0) - (Number(settlementMiniCratesReturned) || 0))} कम</span>
+                                    ) : (
+                                      <span className="text-emerald-600 font-bold">0 Ok</span>
+                                    )}
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td className="p-1.5 font-bold text-rose-950">📦 फूटा / खुला बॉक्स</td>
+                                  <td className="p-1.5 text-center font-mono font-black">{tripFuteBoxesLoaded || '0'}</td>
+                                  <td className="p-1.5 text-center">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={settlementFuteBoxesReturned}
+                                      onChange={(e) => setSettlementFuteBoxesReturned(e.target.value)}
+                                      className="w-16 px-1.5 py-0.5 border border-rose-300 rounded font-mono font-black text-center text-xs bg-rose-50/30"
+                                    />
+                                  </td>
+                                  <td className="p-1.5 text-center font-mono font-black">
+                                    {(Number(tripFuteBoxesLoaded) || 0) - (Number(settlementFuteBoxesReturned) || 0) !== 0 ? (
+                                      <span className="text-amber-700 font-bold">{(Number(tripFuteBoxesLoaded) || 0) - (Number(settlementFuteBoxesReturned) || 0)} Bx</span>
+                                    ) : (
+                                      <span className="text-emerald-600 font-bold">0 Ok</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Missing Crates Alert */}
+                          {((Math.max(0, (Number(tripBigCratesLoaded) || 0) - (Number(settlementBigCratesReturned) || 0)) > 0) ||
+                            (Math.max(0, (Number(tripMiniCratesLoaded) || 0) - (Number(settlementMiniCratesReturned) || 0)) > 0)) ? (
+                            <div className="p-2 rounded-lg bg-rose-50 border-2 border-rose-400 text-rose-900 text-xs font-bold space-y-0.5 animate-pulse">
+                              <div className="flex items-center gap-1.5 text-rose-700 font-black">
+                                <i className="fa-solid fa-triangle-exclamation text-sm"></i> ⚠️ क्रेट मिसिंग / कम जमा हुआ!
+                              </div>
+                              <div className="text-[11px]">
+                                {Math.max(0, (Number(tripBigCratesLoaded) || 0) - (Number(settlementBigCratesReturned) || 0)) > 0 && (
+                                  <span className="mr-2 font-black">• बड़ा क्रेट: {Math.max(0, (Number(tripBigCratesLoaded) || 0) - (Number(settlementBigCratesReturned) || 0))} कम</span>
+                                )}
+                                {Math.max(0, (Number(tripMiniCratesLoaded) || 0) - (Number(settlementMiniCratesReturned) || 0)) > 0 && (
+                                  <span className="font-black">• छोटा क्रेट: {Math.max(0, (Number(tripMiniCratesLoaded) || 0) - (Number(settlementMiniCratesReturned) || 0))} कम</span>
+                                )}
+                              </div>
+                              <span className="text-[9.5px] text-rose-800 block">
+                                चालक ({tripEditDriver}) व कैशियर ({tripEditCashier}) से क्रेट की वापसी या भरपाई सुनिश्चित करें।
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="p-1.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-900 text-[11px] font-bold text-center">
+                              ✅ सभी क्रेट्स (Big & Mini) व फूटे बॉक्स 100% सही जमा हो गए (0 Missing)!
+                            </div>
+                          )}
+
+                          {/* Boxes Delivered & Returned Inputs */}
+                          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-indigo-100">
                             <div>
-                              <label className="text-[10px] font-bold text-slate-600 block mb-0.5">वितरित बॉक्स</label>
+                              <label className="text-[10px] font-bold text-slate-600 block mb-0.5">वितरित बॉक्स (Delivered)</label>
                               <input
                                 type="number"
                                 value={settlementBoxesDelivered}
                                 onChange={(e) => setSettlementBoxesDelivered(e.target.value)}
-                                className="w-full px-2.5 py-1.5 border border-indigo-300 rounded-lg font-mono font-bold text-xs bg-indigo-50/20"
+                                className="w-full px-2 py-1 border border-indigo-300 rounded font-mono font-bold text-xs bg-indigo-50/20"
                               />
                             </div>
                             <div>
-                              <label className="text-[10px] font-bold text-slate-600 block mb-0.5">वापस बॉक्स</label>
+                              <label className="text-[10px] font-bold text-slate-600 block mb-0.5">वापस बॉक्स (Returned)</label>
                               <input
                                 type="number"
                                 value={settlementBoxesReturned}
                                 onChange={(e) => setSettlementBoxesReturned(e.target.value)}
-                                className="w-full px-2.5 py-1.5 border border-rose-300 rounded-lg font-mono font-bold text-xs bg-rose-50/20 text-rose-950"
+                                className="w-full px-2 py-1 border border-rose-300 rounded font-mono font-bold text-xs bg-rose-50/20 text-rose-950"
                               />
                             </div>
                           </div>
-                          <div className="text-[10px] font-bold flex justify-between pt-1">
-                            <span>लोड: {totalBoxesDispatched}</span>
-                            <span className={boxesDiff === 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                          <div className="text-[10px] font-bold flex justify-between pt-0.5">
+                            <span>कुल लोड: {totalBoxesDispatched} Bx</span>
+                            <span className={boxesDiff === 0 ? 'text-emerald-700 font-black' : 'text-rose-700 font-black'}>
                               {boxesDiff === 0 ? '✅ Boxes Ok' : `⚠️ अंतर: ${boxesDiff} Box`}
                             </span>
                           </div>
@@ -7856,6 +8163,76 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                           </div>
                         )}
 
+                        {/* NEW: Plastic Crates & Damaged/Fute Boxes Reconciliation Summary */}
+                        <div className="avoid-break border-2 border-black rounded-lg p-2.5 bg-slate-50 text-black text-xs">
+                          <div className="flex justify-between items-center border-b border-black pb-1 mb-1.5 font-black">
+                            <span className="uppercase text-[11px] flex items-center gap-1.5">
+                              📦 क्रेट्स व फूटा बॉक्स मिलान रिपोर्ट (CRATES & BOXES RECONCILIATION & MISSING CONTROL):
+                            </span>
+                            <span className="font-mono text-[10px]">
+                              Van: {tripEditVan} | Load: #{selectedTripLoadNo}
+                            </span>
+                          </div>
+                          <table className="w-full text-left border-collapse text-xs">
+                            <thead className="bg-slate-200 text-[10px] font-black uppercase border-b border-black">
+                              <tr>
+                                <th className="p-1 border border-black">कंटेनर प्रकार (Container Type)</th>
+                                <th className="p-1 border border-black text-center w-24">सुबह भेजा</th>
+                                <th className="p-1 border border-black text-center w-24">शाम को जमा</th>
+                                <th className="p-1 border border-black text-center w-28">अंतर / कम</th>
+                                <th className="p-1 border border-black text-left">स्थिति व जिम्मेदारी (Status)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-black font-bold">
+                              <tr>
+                                <td className="p-1 border border-black font-black">1. बड़ा प्लास्टिक क्रेट (Big Crate)</td>
+                                <td className="p-1 border border-black text-center font-mono font-black">{tripBigCratesLoaded || '0'}</td>
+                                <td className="p-1 border border-black text-center font-mono font-black">{settlementBigCratesReturned || '0'}</td>
+                                <td className="p-1 border border-black text-center font-mono font-black">
+                                  {Math.max(0, (Number(tripBigCratesLoaded) || 0) - (Number(settlementBigCratesReturned) || 0)) > 0 ? (
+                                    <span className="text-red-700 font-black">⚠️ {Math.max(0, (Number(tripBigCratesLoaded) || 0) - (Number(settlementBigCratesReturned) || 0))} कम</span>
+                                  ) : (
+                                    <span className="text-emerald-700 font-bold">0 Ok</span>
+                                  )}
+                                </td>
+                                <td className="p-1 border border-black text-[10px]">
+                                  {Math.max(0, (Number(tripBigCratesLoaded) || 0) - (Number(settlementBigCratesReturned) || 0)) > 0 ? 'कम क्रेट - ड्राइवर/कैशियर से भरपाई लें' : 'पूरे क्रेट्स जमा'}
+                                </td>
+                              </tr>
+                              <tr>
+                                <td className="p-1 border border-black font-black">2. छोटा प्लास्टिक क्रेट (Mini Crate)</td>
+                                <td className="p-1 border border-black text-center font-mono font-black">{tripMiniCratesLoaded || '0'}</td>
+                                <td className="p-1 border border-black text-center font-mono font-black">{settlementMiniCratesReturned || '0'}</td>
+                                <td className="p-1 border border-black text-center font-mono font-black">
+                                  {Math.max(0, (Number(tripMiniCratesLoaded) || 0) - (Number(settlementMiniCratesReturned) || 0)) > 0 ? (
+                                    <span className="text-red-700 font-black">⚠️ {Math.max(0, (Number(tripMiniCratesLoaded) || 0) - (Number(settlementMiniCratesReturned) || 0))} कम</span>
+                                  ) : (
+                                    <span className="text-emerald-700 font-bold">0 Ok</span>
+                                  )}
+                                </td>
+                                <td className="p-1 border border-black text-[10px]">
+                                  {Math.max(0, (Number(tripMiniCratesLoaded) || 0) - (Number(settlementMiniCratesReturned) || 0)) > 0 ? 'कम क्रेट - ड्राइवर/कैशियर से भरपाई लें' : 'पूरे क्रेट्स जमा'}
+                                </td>
+                              </tr>
+                              <tr>
+                                <td className="p-1 border border-black font-black">3. फूटा / खुला बॉक्स (Fute / Loose Box)</td>
+                                <td className="p-1 border border-black text-center font-mono font-black">{tripFuteBoxesLoaded || '0'}</td>
+                                <td className="p-1 border border-black text-center font-mono font-black">{settlementFuteBoxesReturned || '0'}</td>
+                                <td className="p-1 border border-black text-center font-mono font-black">
+                                  {(Number(tripFuteBoxesLoaded) || 0) - (Number(settlementFuteBoxesReturned) || 0) !== 0 ? (
+                                    <span>{(Number(tripFuteBoxesLoaded) || 0) - (Number(settlementFuteBoxesReturned) || 0)} Bx</span>
+                                  ) : (
+                                    <span className="text-emerald-700 font-bold">0 Ok</span>
+                                  )}
+                                </td>
+                                <td className="p-1 border border-black text-[10px]">
+                                  Loader ({tripEditLoader}) द्वारा वेअरहाउस में वापसी माल वेरीफाई हुआ
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+
                         {/* Signatures Undertaking */}
                         <div className="avoid-break grid grid-cols-4 gap-3 pt-6 text-center text-xs border-t-2 border-black text-black">
                           <div>
@@ -8122,6 +8499,17 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                   <span className="text-[8.5px] font-bold text-slate-600 block uppercase">Cashier (रोकड़िया):</span>
                   <strong className="text-black font-black truncate block">{tripEditCashier}</strong>
                 </div>
+              </div>
+
+              {/* Crates & Boxes Summary Strip on Envelope Slip */}
+              <div className="border border-black p-1.5 bg-slate-50 text-[9px] font-bold flex justify-between items-center">
+                <span>📦 क्रेट्स व बॉक्स स्थिति:</span>
+                <span>बड़ा क्रेट: {settlementBigCratesReturned}/{tripBigCratesLoaded}</span>
+                <span>छोटा क्रेट: {settlementMiniCratesReturned}/{tripMiniCratesLoaded}</span>
+                <span>फूटा बॉक्स: {settlementFuteBoxesReturned}/{tripFuteBoxesLoaded}</span>
+                <span className={((Number(tripBigCratesLoaded) || 0) - (Number(settlementBigCratesReturned) || 0) > 0) || ((Number(tripMiniCratesLoaded) || 0) - (Number(settlementMiniCratesReturned) || 0) > 0) ? "text-red-700 font-black" : "text-emerald-800 font-black"}>
+                  {((Number(tripBigCratesLoaded) || 0) - (Number(settlementBigCratesReturned) || 0) > 0) || ((Number(tripMiniCratesLoaded) || 0) - (Number(settlementMiniCratesReturned) || 0) > 0) ? "⚠️ Crate Shortage" : "✅ Crates 100% Ok"}
+                </span>
               </div>
 
               {/* BIG CASH HIGHLIGHT BOX */}
