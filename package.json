@@ -11,8 +11,6 @@
     "start": "tsx server.ts",
     "dev": "tsx server.ts",
     "build": "vite build",
-    "postinstall": "vite build",
-    "prestart": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
