@@ -238,15 +238,23 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
   const [isSavingTripEntries, setIsSavingTripEntries] = useState<boolean>(false);
   const [importedEveningOrders, setImportedEveningOrders] = useState<Order[]>([]);
 
-  // Dynamic Available Load Numbers from current orders
+  // Dynamic Available Load Numbers from current orders (Clean, Trimmed, Strictly Deduplicated)
   const availableLoadNumbers = useMemo(() => {
     const setOfLoads = new Set<string>();
+    const normalizeLoad = (val: any) => {
+      if (!val) return '';
+      return String(val).replace(/^[#\s]+/, '').trim();
+    };
+
     orders.forEach(o => {
-      if (o.loadNumber) setOfLoads.add(String(o.loadNumber).trim());
+      const l = normalizeLoad(o.loadNumber);
+      if (l) setOfLoads.add(l);
     });
     importedEveningOrders.forEach(o => {
-      if (o.loadNumber) setOfLoads.add(String(o.loadNumber).trim());
+      const l = normalizeLoad(o.loadNumber);
+      if (l) setOfLoads.add(l);
     });
+
     const sorted = Array.from(setOfLoads).sort((a, b) => {
       const numA = parseInt(a, 10);
       const numB = parseInt(b, 10);
@@ -3052,7 +3060,7 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
               const cParty = cleanStr(cleanPartyName);
               const currentLoad = detectedLoadNo || selectedTripLoadNo || '193';
 
-              // Check if order already exists in current orders (Crection / No Duplicates)
+              // Check if order already exists in current orders (Correction / No Duplicates)
               let matchedExisting = orders.find(o => {
                 const oNo = cleanStr(o.orderNumber);
                 const oInv = cleanStr(o.invoiceNumber);
@@ -3163,9 +3171,20 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
                 notes: remStr || (isCancel ? 'CANCEL' : isSignBill ? 'SIGN BILL' : '')
               };
 
+              // Map all variations of billKey & orderNumber for guaranteed lookup
               updatedBillsState[billKey] = billStateRecord;
-              if (finalOrderObj.orderNumber && finalOrderObj.orderNumber !== billKey) {
+              updatedBillsState[cBillKey] = billStateRecord;
+              if (finalOrderObj.orderNumber) {
                 updatedBillsState[finalOrderObj.orderNumber] = billStateRecord;
+                updatedBillsState[cleanStr(finalOrderObj.orderNumber)] = billStateRecord;
+                updatedBillsState[finalOrderObj.orderNumber.replace(/^\/+/, '')] = billStateRecord;
+                updatedBillsState[`/${finalOrderObj.orderNumber.replace(/^\/+/, '')}`] = billStateRecord;
+              }
+              if (finalOrderObj.id) {
+                updatedBillsState[finalOrderObj.id] = billStateRecord;
+              }
+              if (cParty) {
+                updatedBillsState[`pty_${cParty}`] = billStateRecord;
               }
 
               newlyCreatedOrders.push(finalOrderObj);
@@ -7960,15 +7979,26 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                               {tripOrders.map((ord, idx) => {
-                                const bState = settlementBillsState[ord.orderNumber] || {
+                                const cleanStr = (s: any) => String(s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                                const cOrdNo = cleanStr(ord.orderNumber);
+                                const rawOrdNo = String(ord.orderNumber || '').replace(/^\/+/, '');
+                                const slashOrdNo = `/${rawOrdNo}`;
+                                const cParty = cleanStr(ord.partyName);
+
+                                const bState = settlementBillsState[ord.orderNumber] ||
+                                  settlementBillsState[cOrdNo] ||
+                                  settlementBillsState[rawOrdNo] ||
+                                  settlementBillsState[slashOrdNo] ||
+                                  (ord.id ? settlementBillsState[ord.id] : null) ||
+                                  (cParty ? settlementBillsState[`pty_${cParty}`] : null) || {
                                   deliveryStatus: ord.deliveryStatus || 'Delivered',
                                   paymentMode: ord.billType || 'CASH',
-                                  paidAmount: ord.billType === 'CREDIT' ? 0 : ord.totalBill,
-                                  cashAmount: ord.billType === 'CREDIT' ? 0 : ord.totalBill,
-                                  chequeAmount: 0,
-                                  upiAmount: 0,
-                                  rtnAmount: 0,
-                                  notes: ''
+                                  paidAmount: (ord as any).paidAmount ?? (ord.billType === 'CREDIT' ? 0 : ord.totalBill),
+                                  cashAmount: (ord as any).cashAmount !== undefined ? (ord as any).cashAmount : (ord.billType === 'CREDIT' ? 0 : ord.totalBill),
+                                  chequeAmount: (ord as any).chequeAmount || 0,
+                                  upiAmount: (ord as any).upiAmount || 0,
+                                  rtnAmount: (ord as any).rtnAmount || 0,
+                                  notes: (ord as any).deliveryRemarks || ''
                                 };
                                 return (
                                   <tr key={ord.id || ord.orderNumber} className="hover:bg-slate-50">
