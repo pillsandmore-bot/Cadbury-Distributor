@@ -1254,7 +1254,8 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
       }
 
       // If this van is new, register to fleet master
-      if (onAddNewVehicle && tripEditVan && !vehicles.some(v => v.vehicleNumber.toUpperCase() === tripEditVan.toUpperCase())) {
+      const vehList = Array.isArray(vehicles) ? vehicles : [];
+      if (onAddNewVehicle && tripEditVan && !vehList.some(v => v && v.vehicleNumber && v.vehicleNumber.toUpperCase() === tripEditVan.toUpperCase())) {
         onAddNewVehicle({
           vehicleNumber: tripEditVan,
           driverName: tripEditDriver,
@@ -7123,7 +7124,7 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                           const loadOrders = orders.filter(o => String(o.loadNumber || '').trim() === lNo);
                           const totalVal = loadOrders.reduce((s, o) => s + (o.totalBill || 0), 0);
                           const isSelected = String(selectedTripLoadNo).trim() === lNo;
-                          const isSettled = pastSettlements.some(s => String(s.loadNumber || '').trim() === lNo);
+                          const isSettled = Array.isArray(pastSettlements) && pastSettlements.some(s => String(s?.loadNumber || '').trim() === lNo);
 
                           return (
                             <button

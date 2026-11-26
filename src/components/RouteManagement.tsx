@@ -25,10 +25,12 @@ export const RouteManagement: React.FC<RouteManagementProps> = ({
 
   const selectedRoute = routes.find(r => r.id === selectedRouteId) || routes[0];
 
-  const partiesInSelectedRoute = parties.filter(p => 
-    p.routeId === (selectedRoute ? selectedRoute.id : '') ||
-    (selectedRoute && selectedRoute.areas.some(a => p.area.toLowerCase().includes(a.toLowerCase())))
-  );
+  const partiesInSelectedRoute = parties.filter(p => {
+    if (!p) return false;
+    if (selectedRoute && p.routeId === selectedRoute.id) return true;
+    const areas = selectedRoute?.areas || (selectedRoute?.area ? [selectedRoute.area] : []);
+    return areas.some(a => p.area && a && p.area.toLowerCase().includes(a.toLowerCase()));
+  });
 
   const handleCreateRoute = (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,9 +79,12 @@ export const RouteManagement: React.FC<RouteManagementProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         {routes.map((rt) => {
           const isSelected = selectedRoute && rt.id === selectedRoute.id;
-          const assignedParties = parties.filter(p => 
-            p.routeId === rt.id || rt.areas.some(a => p.area.toLowerCase().includes(a.toLowerCase()))
-          );
+          const rtAreas = rt.areas || (rt.area ? [rt.area] : []);
+          const assignedParties = parties.filter(p => {
+            if (!p) return false;
+            if (p.routeId === rt.id) return true;
+            return rtAreas.some(a => p.area && a && p.area.toLowerCase().includes(a.toLowerCase()));
+          });
 
           return (
             <div
@@ -123,7 +128,7 @@ export const RouteManagement: React.FC<RouteManagementProps> = ({
                     Coverage Areas:
                   </span>
                   <div className="flex flex-wrap gap-1">
-                    {rt.areas.map(area => (
+                    {(rt.areas || (rt.area ? [rt.area] : [])).map(area => (
                       <span key={area} className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] font-medium">
                         {area}
                       </span>
