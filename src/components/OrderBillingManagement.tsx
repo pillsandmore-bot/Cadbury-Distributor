@@ -376,11 +376,11 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
   const [importSuccessMsg, setImportSuccessMsg] = useState<string>('');
 
   // Bulk Import Batch Assignment Defaults
-  const [batchVehicleNumber, setBatchVehicleNumber] = useState<string>('MH 02 EK 4589');
-  const [batchDriverName, setBatchDriverName] = useState<string>('Santosh Yadav');
-  const [batchLoaderName, setBatchLoaderName] = useState<string>('Ramesh Kumar');
-  const [batchCashierName, setBatchCashierName] = useState<string>('Suresh Patil');
-  const [batchLoadNumber, setBatchLoadNumber] = useState<string>('189');
+  const [batchVehicleNumber, setBatchVehicleNumber] = useState<string>('V1');
+  const [batchDriverName, setBatchDriverName] = useState<string>('Santosh');
+  const [batchLoaderName, setBatchLoaderName] = useState<string>('Arjun (LDR)');
+  const [batchCashierName, setBatchCashierName] = useState<string>('Adarsh (Cashier)');
+  const [batchLoadNumber, setBatchLoadNumber] = useState<string>('188');
 
   const categories = Object.values(CadburyProductCategory);
 
@@ -403,15 +403,25 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
 
   const handleBatchVehicleChange = (vehNum: string) => {
     setBatchVehicleNumber(vehNum);
-    const foundVeh = vehicles.find(v => v.vehicleNumber.toLowerCase() === vehNum.trim().toLowerCase());
+    // 1. Check in vehicles fleet
+    const foundVeh = Array.isArray(vehicles) ? vehicles.find(v => v.vehicleNumber.toLowerCase() === vehNum.trim().toLowerCase()) : undefined;
     if (foundVeh) {
       if (foundVeh.driverName) setBatchDriverName(foundVeh.driverName);
       if (foundVeh.helperLoaderName || foundVeh.loaderName) {
-        setBatchLoaderName(foundVeh.helperLoaderName || foundVeh.loaderName || 'Ramesh Kumar');
+        setBatchLoaderName(foundVeh.helperLoaderName || foundVeh.loaderName || 'subham (LDR)');
       }
       if (foundVeh.cashierName) {
         setBatchCashierName(foundVeh.cashierName);
       }
+      return;
+    }
+
+    // 2. If matching active trip crew
+    if (tripEditVan && vehNum.trim().toUpperCase() === tripEditVan.trim().toUpperCase()) {
+      if (tripEditDriver) setBatchDriverName(tripEditDriver);
+      if (tripEditLoader) setBatchLoaderName(tripEditLoader);
+      if (tripEditCashier) setBatchCashierName(tripEditCashier);
+      if (selectedTripLoadNo && selectedTripLoadNo !== 'ALL') setBatchLoadNumber(selectedTripLoadNo);
     }
   };
 
@@ -4241,7 +4251,15 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
           </button>
 
           <button
-            onClick={() => setIsImportModalOpen(true)}
+            onClick={() => {
+              // Sync current trip crew selection as initial defaults for bulk import
+              setBatchVehicleNumber(tripEditVan || 'V1');
+              setBatchDriverName(tripEditDriver || 'Santosh');
+              setBatchLoaderName(tripEditLoader || 'Arjun (LDR)');
+              setBatchCashierName(tripEditCashier || 'Adarsh (Cashier)');
+              setBatchLoadNumber(selectedTripLoadNo === 'ALL' ? '188' : (selectedTripLoadNo || '188'));
+              setIsImportModalOpen(true);
+            }}
             className="px-4 py-3 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-xs rounded-xl backdrop-blur-md shadow-md flex items-center gap-2 active:scale-95 transition-all"
           >
             <i className="fa-solid fa-file-import text-gold-400"></i> Import Bills (Excel / CSV)
@@ -4878,80 +4896,174 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
             )}
 
             {/* Batch Van & Staff Assignment Bar */}
-            <div className="p-3 bg-cadbury-50/50 border border-cadbury-200 rounded-xl space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-extrabold text-cadbury-950 flex items-center gap-1.5">
-                  <i className="fa-solid fa-truck-ramp-box text-cadbury-700"></i>
-                  Delivery Van, Loader (LDR), Cashier & Load No for Imported Bills:
-                </span>
-                <button
-                  type="button"
-                  onClick={handleApplyBatchCrewToRows}
-                  className="px-3 py-1 bg-cadbury-900 hover:bg-cadbury-800 text-white text-[11px] font-bold rounded-lg shadow-sm transition-all"
-                >
-                  <i className="fa-solid fa-check-double mr-1"></i> Apply Crew to All Rows
-                </button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 text-xs">
+            <div className="p-3.5 bg-gradient-to-r from-purple-50/80 via-indigo-50/70 to-amber-50/80 border-2 border-purple-300 rounded-2xl space-y-2.5 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs">
                 <div>
+                  <span className="font-black text-cadbury-950 flex items-center gap-1.5 text-sm">
+                    <i className="fa-solid fa-truck-ramp-box text-cadbury-700"></i>
+                    वैन, ड्राइवर, लोडर, कैशियर व लोड नंबर चयन (Delivery Van & Crew Selection):
+                  </span>
+                  <span className="text-[11px] text-slate-600 block">
+                    जो वैन, ड्राइवर, लोडर और कैशियर आप यहाँ चुनेंगे, वही इम्पोर्ट होने वाले सभी बिलों पर सेट होगा
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBatchVehicleNumber(tripEditVan || 'V1');
+                      setBatchDriverName(tripEditDriver || 'Santosh');
+                      setBatchLoaderName(tripEditLoader || 'Arjun (LDR)');
+                      setBatchCashierName(tripEditCashier || 'Adarsh (Cashier)');
+                      setBatchLoadNumber(selectedTripLoadNo === 'ALL' ? '188' : (selectedTripLoadNo || '188'));
+                    }}
+                    className="px-2.5 py-1 bg-white hover:bg-slate-100 text-cadbury-900 border border-purple-300 text-[11px] font-bold rounded-lg shadow-sm transition-all"
+                    title="मॉर्निंग ट्रिप शीट वाले वैन व स्टाफ को यहाँ कॉपी करें"
+                  >
+                    <i className="fa-solid fa-arrows-rotate text-purple-600 mr-1"></i> Sync from Trip Sheet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApplyBatchCrewToRows}
+                    className="px-3 py-1 bg-cadbury-900 hover:bg-cadbury-800 text-white text-[11px] font-black rounded-lg shadow-sm transition-all flex items-center gap-1"
+                  >
+                    <i className="fa-solid fa-check-double text-gold-400"></i> Apply Crew to All Rows
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick Van Pills (V1 to V6 & Custom) */}
+              <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                <span className="text-[10px] font-black text-slate-700 uppercase">Quick Van:</span>
+                {crewMaster.vans.slice(0, 6).map(v => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => handleBatchVehicleChange(v.name)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-black transition-all ${
+                      batchVehicleNumber.toUpperCase() === v.name.toUpperCase()
+                        ? 'bg-cadbury-900 text-white shadow-sm ring-2 ring-cadbury-500 scale-105'
+                        : 'bg-white hover:bg-purple-100 text-slate-800 border border-slate-300'
+                    }`}
+                  >
+                    {v.name}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 text-xs">
+                {/* 1. Delivery Van */}
+                <div className="bg-white p-2 rounded-xl border border-purple-200">
                   <div className="flex items-center justify-between mb-0.5">
-                    <label className="block text-[10px] font-bold text-slate-700">Delivery Van</label>
+                    <label className="block text-[10px] font-black text-purple-950">1. Delivery Van *</label>
                     <span className="text-[9px] text-cadbury-700 font-bold uppercase">Type/Select</span>
                   </div>
                   <input
                     type="text"
                     list="batch-van-suggestions"
                     value={batchVehicleNumber}
-                    onChange={(e) => handleBatchVehicleChange(e.target.value)}
-                    className="w-full p-1.5 text-xs border border-slate-300 rounded-lg bg-white font-mono font-bold text-slate-800 focus:ring-2 focus:ring-cadbury-600 focus:outline-none"
-                    placeholder="e.g. MH 02 EK 4589 ya Van V2"
+                    onChange={(e) => handleBatchVehicleChange(e.target.value.toUpperCase())}
+                    className="w-full p-1.5 text-xs border border-purple-300 rounded-lg bg-white font-mono font-bold text-slate-900 focus:ring-2 focus:ring-cadbury-600 focus:outline-none uppercase"
+                    placeholder="e.g. V1, V2, V3..."
                   />
                   <datalist id="batch-van-suggestions">
-                    {vehicles.map(v => (
-                      <option key={v.id} value={v.vehicleNumber}>
-                        {v.vehicleNumber} ({v.driverName} - {v.vehicleType})
+                    {crewMaster.vans.map(v => (
+                      <option key={v.id} value={v.name}>
+                        {v.name} ({v.type || 'Van'})
                       </option>
                     ))}
                   </datalist>
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 mb-0.5">Driver Name (खुद लिखें)</label>
+
+                {/* 2. Driver Name & Beat */}
+                <div className="bg-white p-2 rounded-xl border border-blue-200">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <label className="block text-[10px] font-black text-blue-950">2. Driver Name *</label>
+                  </div>
+                  {/* Select from master list */}
+                  <select
+                    onChange={(e) => {
+                      if (e.target.value) setBatchDriverName(e.target.value);
+                    }}
+                    className="w-full p-1 mb-1 border border-blue-300 rounded text-[10px] font-bold bg-blue-50/60 text-blue-950"
+                  >
+                    <option value="">-- ड्राइवर चुनें ({crewMaster.drivers.length}) --</option>
+                    {crewMaster.drivers.map(d => (
+                      <option key={d.id} value={d.name}>{d.name} {d.beat ? `(${d.beat})` : ''}</option>
+                    ))}
+                  </select>
                   <input
                     type="text"
                     value={batchDriverName}
                     onChange={(e) => setBatchDriverName(e.target.value)}
-                    className="w-full p-1.5 text-xs border border-slate-300 rounded-lg font-semibold text-slate-800"
-                    placeholder="Driver ka naam khud dalein"
+                    className="w-full p-1 text-xs border border-blue-300 rounded-lg font-bold text-slate-800"
+                    placeholder="Driver ka naam"
                   />
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 mb-0.5">Loader / LDR (खुद लिखें)</label>
+
+                {/* 3. Loader / LDR */}
+                <div className="bg-white p-2 rounded-xl border border-purple-200">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <label className="block text-[10px] font-black text-purple-950">3. Loader / LDR *</label>
+                  </div>
+                  {/* Select from master list */}
+                  <select
+                    onChange={(e) => {
+                      if (e.target.value) setBatchLoaderName(e.target.value);
+                    }}
+                    className="w-full p-1 mb-1 border border-purple-300 rounded text-[10px] font-bold bg-purple-50/60 text-purple-950"
+                  >
+                    <option value="">-- लोडर चुनें ({crewMaster.loaders.length}) --</option>
+                    {crewMaster.loaders.map(l => (
+                      <option key={l.id} value={l.name}>{l.name} {l.bay ? `(${l.bay})` : ''}</option>
+                    ))}
+                  </select>
                   <input
                     type="text"
                     value={batchLoaderName}
                     onChange={(e) => setBatchLoaderName(e.target.value)}
-                    className="w-full p-1.5 text-xs border border-slate-300 rounded-lg font-semibold text-slate-800"
-                    placeholder="Loader ka naam khud dalein"
+                    className="w-full p-1 text-xs border border-purple-300 rounded-lg font-bold text-slate-800"
+                    placeholder="Loader ka naam"
                   />
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 mb-0.5">Cashier / Staff (खुद लिखें)</label>
+
+                {/* 4. Cashier / Staff */}
+                <div className="bg-white p-2 rounded-xl border border-emerald-200">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <label className="block text-[10px] font-black text-emerald-950">4. Cashier / Staff *</label>
+                  </div>
+                  {/* Select from master list */}
+                  <select
+                    onChange={(e) => {
+                      if (e.target.value) setBatchCashierName(e.target.value);
+                    }}
+                    className="w-full p-1 mb-1 border border-emerald-300 rounded text-[10px] font-bold bg-emerald-50/60 text-emerald-950"
+                  >
+                    <option value="">-- कैशियर चुनें ({crewMaster.cashiers.length}) --</option>
+                    {crewMaster.cashiers.map(c => (
+                      <option key={c.id} value={c.name}>{c.name} {c.location ? `(${c.location})` : ''}</option>
+                    ))}
+                  </select>
                   <input
                     type="text"
                     value={batchCashierName}
                     onChange={(e) => setBatchCashierName(e.target.value)}
-                    className="w-full p-1.5 text-xs border border-slate-300 rounded-lg font-semibold text-slate-800"
-                    placeholder="Cashier ka naam khud dalein"
+                    className="w-full p-1 text-xs border border-emerald-300 rounded-lg font-bold text-slate-800"
+                    placeholder="Cashier ka naam"
                   />
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-700 mb-0.5">Load No / Trip</label>
+
+                {/* 5. Load No / Trip */}
+                <div className="bg-white p-2 rounded-xl border border-amber-200">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <label className="block text-[10px] font-black text-amber-950">5. Load No / Trip *</label>
+                  </div>
                   <input
                     type="text"
                     value={batchLoadNumber}
                     onChange={(e) => setBatchLoadNumber(e.target.value)}
-                    className="w-full p-1.5 text-xs border border-slate-300 rounded-lg font-mono font-bold text-slate-800"
-                    placeholder="189"
+                    className="w-full p-1.5 text-xs border border-amber-300 rounded-lg font-mono font-black text-slate-900 mt-5"
+                    placeholder="e.g. 188 ya 204"
                   />
                 </div>
               </div>
