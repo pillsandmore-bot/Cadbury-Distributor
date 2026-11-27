@@ -169,6 +169,8 @@ export const LiveVehicleMap: React.FC<LiveVehicleMapProps> = ({
 
     // Add Vehicle Markers
     vehicles.forEach(vehicle => {
+      const vLat = Number(vehicle.currentLat) || 19.1136;
+      const vLng = Number(vehicle.currentLng) || 72.8697;
       const isSelected = vehicle.id === selectedVehicleId;
       const vehIcon = window.L.divIcon({
         className: 'custom-vehicle-pin',
@@ -181,23 +183,23 @@ export const LiveVehicleMap: React.FC<LiveVehicleMapProps> = ({
         iconAnchor: [20, 20]
       });
 
-      const vMarker = window.L.marker([vehicle.currentLat, vehicle.currentLng], { icon: vehIcon })
+      const vMarker = window.L.marker([vLat, vLng], { icon: vehIcon })
         .addTo(map)
         .bindPopup(`
           <div style="font-family: inherit; padding: 4px; min-width: 180px;">
             <div style="font-weight: 800; font-size: 13px; color: #3d0c5a;">${vehicle.vehicleNumber}</div>
-            <div style="font-size: 11px; color: #64748b; margin-bottom: 6px;">${vehicle.driverName} (${vehicle.driverMobile})</div>
+            <div style="font-size: 11px; color: #64748b; margin-bottom: 6px;">${vehicle.driverName || 'Driver'} (${vehicle.driverMobile || vehicle.driverPhone || 'N/A'})</div>
             <div style="font-size: 11px; display: flex; justify-content: space-between; margin-bottom: 3px;">
               <span>Status:</span>
-              <strong style="color: #0284c7;">${vehicle.status}</strong>
+              <strong style="color: #0284c7;">${vehicle.status || 'Available'}</strong>
             </div>
             <div style="font-size: 11px; display: flex; justify-content: space-between; margin-bottom: 3px;">
               <span>Speed:</span>
-              <strong>${vehicle.speedKmH} km/h</strong>
+              <strong>${vehicle.speedKmH || 0} km/h</strong>
             </div>
             <div style="font-size: 11px; display: flex; justify-content: space-between;">
               <span>Cooling:</span>
-              <strong style="color: #10b981;">${vehicle.temperatureC}°C</strong>
+              <strong style="color: #10b981;">${vehicle.temperatureC || vehicle.temperatureCelsius || 18}°C</strong>
             </div>
           </div>
         `);
@@ -211,10 +213,14 @@ export const LiveVehicleMap: React.FC<LiveVehicleMapProps> = ({
 
     // Add Route Stops & Route Polyline for Selected Vehicle
     if (selectedVehicle && effectiveStops.length > 0) {
-      const latLngs: [number, number][] = [[selectedVehicle.currentLat, selectedVehicle.currentLng]];
+      const curLat = Number(selectedVehicle.currentLat) || 19.1136;
+      const curLng = Number(selectedVehicle.currentLng) || 72.8697;
+      const latLngs: [number, number][] = [[curLat, curLng]];
 
       effectiveStops.forEach((stop, index) => {
-        latLngs.push([stop.lat, stop.lng]);
+        const sLat = Number(stop.lat) || 19.1465;
+        const sLng = Number(stop.lng) || 72.9365;
+        latLngs.push([sLat, sLng]);
 
         const stopColor =
           stop.status === 'Delivered'
@@ -234,7 +240,7 @@ export const LiveVehicleMap: React.FC<LiveVehicleMapProps> = ({
           iconAnchor: [14, 14]
         });
 
-        const stopMarker = window.L.marker([stop.lat, stop.lng], { icon: stopIcon })
+        const stopMarker = window.L.marker([sLat, sLng], { icon: stopIcon })
           .addTo(map)
           .bindPopup(`
             <div style="font-family: inherit; padding: 4px; min-width: 170px;">

@@ -176,9 +176,14 @@
       "capacityCartons": 120,
       "currentLoadCartons": 0,
       "driverName": "Santosh Yadav",
+      "driverMobile": "9820556677",
       "driverPhone": "9820556677",
       "status": "Available",
       "temperatureCelsius": 18,
+      "temperatureC": 18,
+      "speedKmH": 0,
+      "currentLat": 19.1136,
+      "currentLng": 72.8697,
       "location": "Central Warehouse"
     },
     {
@@ -188,9 +193,14 @@
       "capacityCartons": 120,
       "currentLoadCartons": 0,
       "driverName": "Krishna",
+      "driverMobile": "9820556678",
       "driverPhone": "9820556678",
       "status": "Available",
       "temperatureCelsius": 18,
+      "temperatureC": 18,
+      "speedKmH": 0,
+      "currentLat": 19.1465,
+      "currentLng": 72.9365,
       "location": "Central Warehouse"
     }
   ],
