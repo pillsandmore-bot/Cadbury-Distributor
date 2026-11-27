@@ -267,8 +267,16 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
   }>({});
   const [isSavingTripEntries, setIsSavingTripEntries] = useState<boolean>(false);
   const [importedEveningOrders, setImportedEveningOrders] = useState<Order[]>([]);
+  // Dedicated Separate Evening Settlement Orders - Strictly isolated to Excel uploaded for Evening Settlement
+  const [eveningSettlementOrders, setEveningSettlementOrders] = useState<Order[]>(() => {
+    try {
+      const saved = localStorage.getItem('cadbury_evening_settlement_orders');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return [];
+  });
 
-  // Dynamic Available Load Numbers from current orders (Clean, Trimmed, Strictly Deduplicated)
+  // Dynamic Available Load Numbers for Morning Trip Sheet
   const availableLoadNumbers = useMemo(() => {
     const setOfLoads = new Set<string>();
     const normalizeLoad = (val: any) => {
@@ -280,10 +288,6 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
       const l = normalizeLoad(o.loadNumber);
       if (l) setOfLoads.add(l);
     });
-    importedEveningOrders.forEach(o => {
-      const l = normalizeLoad(o.loadNumber);
-      if (l) setOfLoads.add(l);
-    });
 
     const sorted = Array.from(setOfLoads).sort((a, b) => {
       const numA = parseInt(a, 10);
@@ -292,7 +296,37 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
       return a.localeCompare(b);
     });
     return sorted;
-  }, [orders, importedEveningOrders]);
+  }, [orders]);
+
+  // Dynamic Available Load Numbers strictly for Evening Settlement (from uploaded Evening Excel)
+  const availableEveningLoadNumbers = useMemo(() => {
+    const setOfLoads = new Set<string>();
+    const normalizeLoad = (val: any) => {
+      if (!val) return '';
+      return String(val).replace(/^[#\s]+/, '').trim();
+    };
+
+    eveningSettlementOrders.forEach(o => {
+      const l = normalizeLoad(o.loadNumber);
+      if (l) setOfLoads.add(l);
+    });
+
+    // If no evening Excel uploaded yet, fallback to available morning loads so user can choose to settle
+    if (setOfLoads.size === 0) {
+      orders.forEach(o => {
+        const l = normalizeLoad(o.loadNumber);
+        if (l) setOfLoads.add(l);
+      });
+    }
+
+    const sorted = Array.from(setOfLoads).sort((a, b) => {
+      const numA = parseInt(a, 10);
+      const numB = parseInt(b, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.localeCompare(b);
+    });
+    return sorted;
+  }, [eveningSettlementOrders, orders]);
 
   // Load Deletion State
   const [isDeleteLoadModalOpen, setIsDeleteLoadModalOpen] = useState<boolean>(false);
@@ -1182,25 +1216,20 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
     // Strictly isolate each Load No - never aggregate all loads into one settlement!
     const targetLoad = (loadNo && loadNo !== 'ALL')
       ? loadNo
-      : (selectedTripLoadNo && selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableLoadNumbers[0] || '193'));
+      : (selectedTripLoadNo && selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableEveningLoadNumbers[0] || '193'));
     setSelectedTripLoadNo(targetLoad);
     setSelectedTripVehicle(veh);
     
-    let matching = orders.filter(o => {
+    const sourceList = eveningSettlementOrders.length > 0 ? eveningSettlementOrders : orders;
+
+    let matching = sourceList.filter(o => {
       const matchLoad = String(o.loadNumber || '').trim() === String(targetLoad).trim();
       const matchVeh = veh === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === veh;
       return matchLoad && matchVeh;
     });
 
-    if (matching.length === 0 && importedEveningOrders.length > 0) {
-      matching = importedEveningOrders.filter(o => {
-        const matchLoad = String(o.loadNumber || '').trim() === String(targetLoad).trim();
-        const matchVeh = veh === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === veh;
-        return matchLoad && matchVeh;
-      });
-      if (matching.length === 0) {
-        matching = importedEveningOrders.filter(o => String(o.loadNumber || '').trim() === String(targetLoad).trim());
-      }
+    if (matching.length === 0 && sourceList.length > 0) {
+      matching = sourceList.filter(o => String(o.loadNumber || '').trim() === String(targetLoad).trim());
     }
 
     const tripCashTotal = matching.filter(o => o.billType !== 'CREDIT').reduce((s, o) => s + (o.totalBill || 0), 0);
@@ -1333,21 +1362,13 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
     }
   };
 
-  // Helper to get active trip orders for current selected load & vehicle (Deduplicated)
+  // Helper to get active trip orders for current selected load & vehicle (Deduplicated - strictly from Morning Sheet / Orders)
   const getActiveTripOrders = (loadNo = selectedTripLoadNo, veh = selectedTripVehicle) => {
     let matching = orders.filter(o => {
       const matchLoad = loadNo === 'ALL' || String(o.loadNumber || '').trim() === String(loadNo).trim();
       const matchVeh = veh === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === veh;
       return matchLoad && matchVeh;
     });
-    if (matching.length === 0 && importedEveningOrders.length > 0) {
-      matching = importedEveningOrders.filter(o => {
-        const matchLoad = loadNo === 'ALL' || String(o.loadNumber || '').trim() === String(loadNo).trim();
-        const matchVeh = veh === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === veh;
-        return matchLoad && matchVeh;
-      });
-      if (matching.length === 0) matching = importedEveningOrders;
-    }
 
     // Deduplicate by clean bill number or party to prevent ANY duplicate orders
     const cleanStr = (s: any) => String(s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
@@ -3245,6 +3266,10 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
         setSettlementBoxesReturned(String(retBoxes));
 
         if (newlyCreatedOrders.length > 0) {
+          setEveningSettlementOrders(newlyCreatedOrders);
+          try {
+            localStorage.setItem('cadbury_evening_settlement_orders', JSON.stringify(newlyCreatedOrders));
+          } catch (e) {}
           setImportedEveningOrders(newlyCreatedOrders);
           // Persist to server backend
           try {
@@ -6868,21 +6893,19 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
             {/* Header */}
             {(() => {
               const tripOrders = (() => {
-                const currentLoad = (selectedTripLoadNo && selectedTripLoadNo !== 'ALL') ? selectedTripLoadNo : (availableLoadNumbers[0] || '193');
-                let matched = orders.filter(o => {
+                const currentLoad = (selectedTripLoadNo && selectedTripLoadNo !== 'ALL') ? selectedTripLoadNo : (availableEveningLoadNumbers[0] || '193');
+                
+                // If the user has imported evening Excel orders, strictly prioritize eveningSettlementOrders
+                const sourceList = eveningSettlementOrders.length > 0 ? eveningSettlementOrders : orders;
+
+                let matched = sourceList.filter(o => {
                   const matchLoad = String(o.loadNumber || '').trim() === String(currentLoad).trim();
                   const matchVeh = selectedTripVehicle === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === selectedTripVehicle;
                   return matchLoad && matchVeh;
                 });
-                if (matched.length === 0 && importedEveningOrders.length > 0) {
-                  matched = importedEveningOrders.filter(o => {
-                    const matchLoad = String(o.loadNumber || '').trim() === String(currentLoad).trim();
-                    const matchVeh = selectedTripVehicle === 'ALL' || (o.vehicleNumber || 'MH 02 EK 4589') === selectedTripVehicle;
-                    return matchLoad && matchVeh;
-                  });
-                  if (matched.length === 0) {
-                    matched = importedEveningOrders.filter(o => String(o.loadNumber || '').trim() === String(currentLoad).trim());
-                  }
+                
+                if (matched.length === 0 && sourceList.length > 0) {
+                  matched = sourceList.filter(o => String(o.loadNumber || '').trim() === String(currentLoad).trim());
                 }
 
                 // Deduplicate by clean bill number or party to prevent ANY duplicate rows
@@ -7122,13 +7145,14 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                     <div className="flex flex-wrap items-center gap-2">
                       {/* Dynamic Load dropdown - Isolated by Load No */}
                       <select
-                        value={selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableLoadNumbers[0] || '193')}
+                        value={selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableEveningLoadNumbers[0] || '193')}
                         onChange={(e) => handleOpenEveningSettlement(e.target.value, selectedTripVehicle)}
                         className="px-2.5 py-1.5 border-2 border-emerald-500 rounded-xl text-xs font-mono font-black bg-emerald-50 text-emerald-950 shadow-sm"
                         title="लोड नंबर चुनें - हर लोड का सेटलमेंट अलग है"
                       >
-                        {availableLoadNumbers.map(lNo => {
-                          const count = orders.filter(o => String(o.loadNumber || '').trim() === lNo).length;
+                        {availableEveningLoadNumbers.map(lNo => {
+                          const src = eveningSettlementOrders.length > 0 ? eveningSettlementOrders : orders;
+                          const count = src.filter(o => String(o.loadNumber || '').trim() === lNo).length;
                           return (
                             <option key={lNo} value={lNo}>
                               🚚 Load #{lNo} ({count} Bills)
@@ -7141,12 +7165,12 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                       {isAdmin && (
                         <button
                           type="button"
-                          onClick={() => handleOpenDeleteLoadModal(selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : availableLoadNumbers[0])}
+                          onClick={() => handleOpenDeleteLoadModal(selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : availableEveningLoadNumbers[0])}
                           className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-bold rounded-xl shadow-sm flex items-center gap-1.5 active:scale-95 transition-all"
                           title={`Load #${selectedTripLoadNo} और इसके सभी बिल्स डिलीट करें`}
                         >
                           <i className="fa-solid fa-trash-can text-rose-600"></i>
-                          <span>Delete Load #{selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableLoadNumbers[0] || '193')}</span>
+                          <span>Delete Load #{selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableEveningLoadNumbers[0] || '193')}</span>
                         </button>
                       )}
 
@@ -7245,11 +7269,12 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                      {availableLoadNumbers.length === 0 ? (
-                        <span className="text-xs text-slate-400 italic">कोई लोड नंबर उपलब्ध नहीं है।</span>
+                      {availableEveningLoadNumbers.length === 0 ? (
+                        <span className="text-xs text-slate-400 italic">कोई लोड नंबर उपलब्ध नहीं है। कृपया शाम की एक्सेल शीट इम्पोर्ट करें।</span>
                       ) : (
-                        availableLoadNumbers.map(lNo => {
-                          const loadOrders = orders.filter(o => String(o.loadNumber || '').trim() === lNo);
+                        availableEveningLoadNumbers.map(lNo => {
+                          const src = eveningSettlementOrders.length > 0 ? eveningSettlementOrders : orders;
+                          const loadOrders = src.filter(o => String(o.loadNumber || '').trim() === lNo);
                           const totalVal = loadOrders.reduce((s, o) => s + (o.totalBill || 0), 0);
                           const isSelected = String(selectedTripLoadNo).trim() === lNo;
                           const isSettled = Array.isArray(pastSettlements) && pastSettlements.some(s => String(s?.loadNumber || '').trim() === lNo);
