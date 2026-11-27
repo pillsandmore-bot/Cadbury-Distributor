@@ -9,7 +9,7 @@ interface LoginScreenProps {
 export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLogin }) => {
   const [selectedRole, setSelectedRole] = useState<string>('ALL');
   const [usernameInput, setUsernameInput] = useState<string>('admin');
-  const [passwordInput, setPasswordInput] = useState<string>('cadbury123');
+  const [passwordInput, setPasswordInput] = useState<string>('88283671');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [showQuickProfiles, setShowQuickProfiles] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -64,7 +64,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLogin }) => {
       return;
     }
 
-    const expectedPass = foundUser.password || 'cadbury123';
+    const expectedPass = foundUser.password || (foundUser.username === 'admin' ? '88283671' : 'cadbury123');
     if (expectedPass !== cleanPassword) {
       setErrorMsg('⚠️ गलत पासवर्ड! कृपया सही पासवर्ड दर्ज करें।');
       setIsLoggingIn(false);

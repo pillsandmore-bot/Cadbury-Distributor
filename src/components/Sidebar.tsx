@@ -65,11 +65,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'orders',
-      label: 'Orders & Billing',
+      label: 'Orders & Dispatch',
       icon: 'fa-file-invoice-dollar',
       type: 'group',
       children: [
         { id: 'orders', label: 'New Order / Invoices', icon: 'fa-plus-circle' },
+        { id: 'trip_sheet', label: '🌞 Morning Trip Sheet', icon: 'fa-truck-ramp-box' },
+        { id: 'evening_settlement', label: '🌆 Evening Settlement', icon: 'fa-hand-holding-dollar' },
         { id: 'pipeline', label: 'Order Pipeline Flow', icon: 'fa-bars-staggered' }
       ]
     },

@@ -21,6 +21,8 @@ interface OrderBillingManagementProps {
   parties: Party[];
   orders: Order[];
   vehicles: Vehicle[];
+  currentUser?: AppUser;
+  initialActiveView?: 'orders' | 'trip_sheet' | 'evening_settlement';
   onCreateOrder: (orderData: Partial<Order>) => void;
   onImportOrders?: (ordersList: any[]) => Promise<any>;
   onAddNewVehicle?: (vehicleData: any) => Promise<any>;
@@ -31,6 +33,8 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
   parties,
   orders,
   vehicles,
+  currentUser,
+  initialActiveView = 'orders',
   onCreateOrder,
   onImportOrders,
   onAddNewVehicle
@@ -141,6 +145,25 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
       .catch(() => {});
   }, []);
 
+  // Sync initial view when user opens from Sidebar (Morning Trip Sheet vs Evening Settlement vs Orders)
+  useEffect(() => {
+    if (initialActiveView === 'trip_sheet') {
+      setIsEveningSettlementModalOpen(false);
+      setIsTripSheetModalOpen(true);
+    } else if (initialActiveView === 'evening_settlement') {
+      setIsTripSheetModalOpen(false);
+      setIsEveningSettlementModalOpen(true);
+    }
+  }, [initialActiveView]);
+
+  // Admin Check Helper (Amarjeet / admin / Role.ADMIN)
+  const isAdmin = useMemo(() => {
+    if (!currentUser) return true; // fallback
+    const roleMatch = currentUser.role === Role.ADMIN || currentUser.role === Role.SUPER_ADMIN;
+    const userMatch = String(currentUser.username || '').toLowerCase() === 'admin' || String(currentUser.name || '').toLowerCase().includes('amarjeet');
+    return roleMatch || userMatch || !!currentUser.canAccessAdminDashboard;
+  }, [currentUser]);
+
   // Save / Add item to crewMaster
   const handleSaveCrewMasterItem = async (
     category: 'vans' | 'drivers' | 'loaders' | 'cashiers',
@@ -204,6 +227,10 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
     id: string,
     name: string
   ) => {
+    if (!isAdmin) {
+      alert('⛔ केवल एडमिन (Amarjeet) को वैन, ड्राइवर, लोडर (LDR) या कैशियर हटाने का अधिकार है।');
+      return;
+    }
     const confirm = window.confirm(`क्या आप "${name}" को मास्टर सूची से हटाना चाहते हैं?`);
     if (!confirm) return;
 
@@ -879,6 +906,10 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
 
   // Delete Past Settlement Record
   const handleDeleteSettlementRecord = async (st: any) => {
+    if (!isAdmin) {
+      alert('⛔ केवल एडमिन (Amarjeet) को सुरक्षित सेटलमेंट रिकॉर्ड डिलीट करने का अधिकार है।');
+      return;
+    }
     const settleId = st.id || st.settlementNumber;
     const confirm = window.confirm(`क्या आप सेटलमेंट #${st.settlementNumber} (Load #${st.loadNumber} - ${st.driverName}) को हमेशा के लिए डिलीट करना चाहते हैं?`);
     if (!confirm) return;
@@ -5532,20 +5563,6 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                   <span>📥 Import Morning Sheet (सुबह का चालान)</span>
                 </button>
 
-                {/* Direct Link to Evening Settlement */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsTripSheetModalOpen(false);
-                    handleOpenEveningSettlement(selectedTripLoadNo, selectedTripVehicle);
-                  }}
-                  className="px-3.5 py-2 bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 text-white text-xs font-black rounded-xl shadow-md flex items-center gap-1.5 active:scale-95 transition-all"
-                  title="शाम को गाड़ी लौटने पर रोकड़ व वापसी हिसाब के लिए Evening Settlement खोलें"
-                >
-                  <i className="fa-solid fa-hand-holding-dollar text-gold-300"></i>
-                  <span>🌆 Evening Settlement (शाम का रोकड़ मिलान) ➡️</span>
-                </button>
-
                 {/* Dynamic Load No Filter */}
                 <div className="flex items-center gap-1.5 text-xs">
                   <span className="font-bold text-slate-600">Load:</span>
@@ -6142,16 +6159,6 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                         💡 Tip: Delivery Van, Driver, Loader, Cashier ya Boxes Loaded badal kar button dabayein — sabhi {tripOrders.length} bills aur printout par turant update ho jayega.
                       </div>
                       <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsTripSheetModalOpen(false);
-                            handleOpenEveningSettlement(selectedTripLoadNo, selectedTripVehicle);
-                          }}
-                          className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white text-xs font-black rounded-xl shadow-md flex items-center gap-1.5 active:scale-95 transition-all"
-                        >
-                          <i className="fa-solid fa-receipt text-gold-300"></i> 🌆 Go to Evening Settlement (शाम की वापसी व रोकड़ भरें)
-                        </button>
                         <button
                           type="button"
                           onClick={handleSaveTripCrew}
@@ -7110,21 +7117,6 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                     )}
 
                     <div className="flex flex-wrap items-center gap-2">
-                      {/* Direct Bridge to Morning Trip Loading Sheet */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsEveningSettlementModalOpen(false);
-                          syncTripParameters();
-                          setIsTripSheetModalOpen(true);
-                        }}
-                        className="px-3 py-1.5 bg-gradient-to-r from-indigo-700 to-cadbury-800 hover:from-indigo-800 text-white text-xs font-black rounded-xl shadow-md flex items-center gap-1.5 active:scale-95 transition-all"
-                        title="सुबह का लोडिंग व डिस्पैच चालान देखने या प्रिंट करने हेतु Step 1 खोलें"
-                      >
-                        <i className="fa-solid fa-truck-ramp-box text-amber-300"></i>
-                        <span>🌞 Step 1: Morning Sheet (सुबह का चालान) ⬅️</span>
-                      </button>
-
                       {/* Dynamic Load dropdown - Isolated by Load No */}
                       <select
                         value={selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableLoadNumbers[0] || '193')}
@@ -7142,16 +7134,18 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                         })}
                       </select>
 
-                      {/* Delete Current Load Button */}
-                      <button
-                        type="button"
-                        onClick={() => handleOpenDeleteLoadModal(selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : availableLoadNumbers[0])}
-                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-bold rounded-xl shadow-sm flex items-center gap-1.5 active:scale-95 transition-all"
-                        title={`Load #${selectedTripLoadNo} और इसके सभी बिल्स डिलीट करें`}
-                      >
-                        <i className="fa-solid fa-trash-can text-rose-600"></i>
-                        <span>Delete Load #{selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableLoadNumbers[0] || '193')}</span>
-                      </button>
+                      {/* Delete Current Load Button (Admin Only) */}
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDeleteLoadModal(selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : availableLoadNumbers[0])}
+                          className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 text-xs font-bold rounded-xl shadow-sm flex items-center gap-1.5 active:scale-95 transition-all"
+                          title={`Load #${selectedTripLoadNo} और इसके सभी बिल्स डिलीट करें`}
+                        >
+                          <i className="fa-solid fa-trash-can text-rose-600"></i>
+                          <span>Delete Load #{selectedTripLoadNo !== 'ALL' ? selectedTripLoadNo : (availableLoadNumbers[0] || '193')}</span>
+                        </button>
+                      )}
 
                       {/* Hidden File Input for Evening Settlement Excel/CSV Import */}
                       <input
@@ -9994,14 +9988,16 @@ BILL DATE,BILL NO,PARTY,AMOUNT,CASH,CHEQUE,CREDIT
                           >
                             ✓ Select
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteCrewMasterItem(crewModalTab, item.id, item.name)}
-                            className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-[10px] rounded border border-rose-300"
-                            title="मास्टर से हटाएं"
-                          >
-                            <i className="fa-solid fa-trash-can"></i>
-                          </button>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCrewMasterItem(crewModalTab, item.id, item.name)}
+                              className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-[10px] rounded border border-rose-300"
+                              title="मास्टर से हटाएं (केवल एडमिन)"
+                            >
+                              <i className="fa-solid fa-trash-can"></i>
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );

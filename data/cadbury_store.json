@@ -195,7 +195,7 @@
       "capacityCartons": 120,
       "loadedCartons": 0,
       "status": "Available",
-      "acTemperature": 18.0,
+      "acTemperature": 18,
       "latitude": 19.145,
       "longitude": 72.93
     },
@@ -210,7 +210,7 @@
       "capacityCartons": 120,
       "loadedCartons": 0,
       "status": "Available",
-      "acTemperature": 19.0,
+      "acTemperature": 19,
       "latitude": 19.146,
       "longitude": 72.932
     }
@@ -222,9 +222,9 @@
   "users": [
     {
       "id": "usr-1",
-      "name": "Amar Sharma (Admin / Owner)",
+      "name": "Amarjeet (Admin / Owner)",
       "username": "admin",
-      "password": "cadbury123",
+      "password": "88283671",
       "role": "Admin",
       "phone": "9820011223",
       "email": "admin@cadburydistributor.com",

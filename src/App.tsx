@@ -71,12 +71,17 @@ export const App: React.FC = () => {
   // Current Logged-in User
   const [currentUser, setCurrentUser] = useState<AppUser>({
     id: 'usr-1',
-    name: 'Amar Sharma (Admin / Owner)',
+    name: 'Amarjeet (Admin / Owner)',
     username: 'admin',
     role: Role.ADMIN,
     phone: '9820011223',
+    password: '88283671',
     email: 'admin@cadburydistributor.com',
-    employeeId: 'CAD-ADM-01'
+    employeeId: 'CAD-ADM-01',
+    canAccessAdminDashboard: true,
+    canEditOrders: true,
+    canDeleteOrders: true,
+    canExportReports: true
   });
 
   // Socket Connection and initial fetch
@@ -416,7 +421,7 @@ export const App: React.FC = () => {
       if (currentUser.allowedModules.includes(tab)) return true;
       if (['stock', 'stock_in', 'returns'].includes(tab) && currentUser.allowedModules.includes('inventory')) return true;
       if (['parties', 'ledger'].includes(tab) && currentUser.allowedModules.includes('parties')) return true;
-      if (['orders', 'pipeline'].includes(tab) && currentUser.allowedModules.includes('orders')) return true;
+      if (['orders', 'trip_sheet', 'evening_settlement', 'pipeline'].includes(tab) && currentUser.allowedModules.includes('orders')) return true;
       if (['loader', 'routes', 'delivery_boy'].includes(tab) && currentUser.allowedModules.includes('logistics')) return true;
       if (['ledger', 'outstanding'].includes(tab) && currentUser.allowedModules.includes('accounts')) return true;
       if (['map'].includes(tab) && currentUser.allowedModules.includes('tracking')) return true;
@@ -436,6 +441,8 @@ export const App: React.FC = () => {
       case 'map': return 'Live Fleet GPS Telematics & Route Map';
       case 'parties': return 'Party & Retailer Master Accounts';
       case 'orders': return 'Order Booking & Cadbury Tax Invoicing';
+      case 'trip_sheet': return 'Step 1: Trip Dispatch & Loading Sheet (सुबह का लोडिंग चालान)';
+      case 'evening_settlement': return 'Step 2: Evening Van Return & Cash Settlement (शाम की वैन वापसी व रोकड़ मिलान)';
       case 'loader': return 'Warehouse Loader Operations & Carton Counts';
       case 'delivery_boy': return 'Delivery Boy Mobile Dashboard & POD';
       case 'returns': return 'Sales Return & Damaged Goods Management';
@@ -639,12 +646,14 @@ export const App: React.FC = () => {
                   />
                 )}
 
-                {activeTab === 'orders' && (
+                {(activeTab === 'orders' || activeTab === 'trip_sheet' || activeTab === 'evening_settlement') && (
                   <OrderBillingManagement
                     products={products}
                     parties={parties}
                     orders={orders}
                     vehicles={vehicles}
+                    currentUser={currentUser}
+                    initialActiveView={activeTab === 'trip_sheet' ? 'trip_sheet' : activeTab === 'evening_settlement' ? 'evening_settlement' : 'orders'}
                     onCreateOrder={handleCreateOrder}
                     onImportOrders={handleImportOrders}
                     onAddNewVehicle={handleAddVehicle}
