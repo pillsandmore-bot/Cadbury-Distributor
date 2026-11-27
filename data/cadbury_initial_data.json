@@ -170,49 +170,28 @@
   "parties": [],
   "vehicles": [
     {
-      "id": "veh-1",
-      "vehicleNumber": "MH 02 EK 4589",
-      "driverName": "Santosh Yadav",
-      "driverPhone": "9820011223",
-      "loaderName": "Subham (LDR)",
-      "cashierName": "Tejas (Cashier)",
-      "currentLocation": "Warehouse Central Bay",
-      "capacityCartons": 150,
-      "loadedCartons": 0,
-      "status": "Available",
-      "acTemperature": 18.5,
-      "latitude": 19.1463,
-      "longitude": 72.9312
-    },
-    {
-      "id": "veh-2",
+      "id": "v1",
       "vehicleNumber": "V1",
-      "driverName": "Santosh Yadav",
-      "driverPhone": "9820011223",
-      "loaderName": "Subham (LDR)",
-      "cashierName": "Tejas (Cashier)",
-      "currentLocation": "Warehouse Bay 1",
+      "model": "Tata Ace Gold",
       "capacityCartons": 120,
-      "loadedCartons": 0,
+      "currentLoadCartons": 0,
+      "driverName": "Santosh Yadav",
+      "driverPhone": "9820556677",
       "status": "Available",
-      "acTemperature": 18,
-      "latitude": 19.145,
-      "longitude": 72.93
+      "temperatureCelsius": 18,
+      "location": "Central Warehouse"
     },
     {
-      "id": "veh-3",
+      "id": "v2",
       "vehicleNumber": "V2",
-      "driverName": "Krishna",
-      "driverPhone": "9820044556",
-      "loaderName": "Aniket (LDR)",
-      "cashierName": "Adarsh (Cashier)",
-      "currentLocation": "Warehouse Bay 2",
+      "model": "Tata Ace Gold",
       "capacityCartons": 120,
-      "loadedCartons": 0,
+      "currentLoadCartons": 0,
+      "driverName": "Krishna",
+      "driverPhone": "9820556678",
       "status": "Available",
-      "acTemperature": 19,
-      "latitude": 19.146,
-      "longitude": 72.932
+      "temperatureCelsius": 18,
+      "location": "Central Warehouse"
     }
   ],
   "orders": [],
@@ -285,5 +264,115 @@
       "employeeId": "CAD-SLS-01"
     }
   ],
-  "tripSettlements": []
+  "tripSettlements": [],
+  "crewMaster": {
+    "vans": [
+      {
+        "id": "v1",
+        "name": "V1",
+        "type": "Van 1"
+      },
+      {
+        "id": "v2",
+        "name": "V2",
+        "type": "Van 2"
+      },
+      {
+        "id": "v3",
+        "name": "V3",
+        "type": "Van 3"
+      },
+      {
+        "id": "v4",
+        "name": "V4",
+        "type": "Van 4"
+      },
+      {
+        "id": "v5",
+        "name": "V5",
+        "type": "Van 5"
+      },
+      {
+        "id": "v6",
+        "name": "V6",
+        "type": "Van 6"
+      },
+      {
+        "id": "v7",
+        "name": "V7",
+        "type": "Van 7"
+      },
+      {
+        "id": "v8",
+        "name": "V8",
+        "type": "Van 8"
+      },
+      {
+        "id": "v9",
+        "name": "V9",
+        "type": "Van 9"
+      },
+      {
+        "id": "v10",
+        "name": "V10",
+        "type": "Van 10"
+      }
+    ],
+    "drivers": [
+      {
+        "id": "d1",
+        "name": "Santosh Yadav",
+        "beat": "Bhandup West Beat"
+      },
+      {
+        "id": "d2",
+        "name": "Krishna",
+        "beat": "Bhandup Station Road"
+      },
+      {
+        "id": "d3",
+        "name": "Ramesh Kumar",
+        "beat": "Mulund West Beat"
+      },
+      {
+        "id": "d4",
+        "name": "Mukesh Sharma",
+        "beat": "Kanjurmarg Beat"
+      }
+    ],
+    "loaders": [
+      {
+        "id": "l1",
+        "name": "subham (LDR)",
+        "bay": "Central Warehouse Bay 1"
+      },
+      {
+        "id": "l2",
+        "name": "Arjun (LDR)",
+        "bay": "Central Warehouse Bay 2"
+      },
+      {
+        "id": "l3",
+        "name": "Ramesh (LDR)",
+        "bay": "Central Warehouse Bay 3"
+      }
+    ],
+    "cashiers": [
+      {
+        "id": "c1",
+        "name": "tejas (Cashier)",
+        "location": "Main Collection Counter"
+      },
+      {
+        "id": "c2",
+        "name": "Adarsh (Cashier)",
+        "location": "Station Road Counter"
+      },
+      {
+        "id": "c3",
+        "name": "Vikas (Cashier)",
+        "location": "Warehouse Counter"
+      }
+    ]
+  }
 }
