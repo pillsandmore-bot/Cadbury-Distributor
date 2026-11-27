@@ -13,7 +13,9 @@ import {
   OrderItem, 
   Vehicle, 
   CadburyProductCategory,
-  GoodsStage
+  GoodsStage,
+  AppUser,
+  Role
 } from '../types/cadbury';
 
 interface OrderBillingManagementProps {
@@ -159,7 +161,8 @@ export const OrderBillingManagement: React.FC<OrderBillingManagementProps> = ({
   // Admin Check Helper (Amarjeet / admin / Role.ADMIN)
   const isAdmin = useMemo(() => {
     if (!currentUser) return true; // fallback
-    const roleMatch = currentUser.role === Role.ADMIN || currentUser.role === Role.SUPER_ADMIN;
+    const roleStr = String(currentUser.role || '').toLowerCase();
+    const roleMatch = roleStr === 'admin' || roleStr === 'super_admin' || (typeof Role !== 'undefined' && (currentUser.role === Role.ADMIN || currentUser.role === Role.SUPER_ADMIN));
     const userMatch = String(currentUser.username || '').toLowerCase() === 'admin' || String(currentUser.name || '').toLowerCase().includes('amarjeet');
     return roleMatch || userMatch || !!currentUser.canAccessAdminDashboard;
   }, [currentUser]);
